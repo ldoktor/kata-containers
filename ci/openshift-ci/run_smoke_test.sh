@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Run a smoke test.
+# Run a smoke test. CHANGE2
 #
 
 script_dir=$(dirname $0)
