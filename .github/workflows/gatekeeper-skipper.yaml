@@ -1,0 +1,40 @@
+name: Skipper
+on:
+  workflow_call:
+    inputs:
+      commit-hash:
+        required: true
+        type: string
+      target-branch:
+        required: false
+        type: string
+        default: ""
+    outputs:
+      skip_build:
+        value: ${{ jobs.skipper.outputs.skip_build }}
+      skip_test:
+        value: ${{ jobs.skipper.outputs.skip_test }}
+      skip_static:
+        value: ${{ jobs.skipper.outputs.skip_static }}
+
+
+jobs:
+  skipper:
+    runs-on: ubuntu-latest
+    outputs:
+      skip_build: ${{ steps.skipper.outputs.skip_build }}
+      skip_test: ${{ steps.skipper.outputs.skip_test }}
+      skip_static: ${{ steps.skipper.outputs.skip_static }}
+    steps:
+      # FIXME: Decide whether we want to use `skips.py` and
+      # `required-tests.yaml` from target or main
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit-hash }}
+          fetch-depth: 0
+      - id: skipper
+        env:
+          TARGET_BRANCH: ${{ inputs.target-branch }}
+        run: |
+          python3 tools/testing/gatekeeper/skips.py | tee -a "$GITHUB_OUTPUT"
+        shell: /usr/bin/bash -x {0}

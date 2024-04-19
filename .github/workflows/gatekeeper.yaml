@@ -1,0 +1,32 @@
+name: Gatekeeper
+on:
+  pull_request_target:
+    types:
+      - open
+      - synchronize
+      - reopened
+      - labeled
+
+jobs:
+  gatekeeper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - id: gatekeeper
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          #!/usr/bin/env bash -x
+          mapfile -t lines < <(python3 tools/testing/gatekeeper/skips.py -t)
+          export REQUIRED_JOBS="${lines[0]}"
+          export REQUIRED_REGEXPS="${lines[1]}"
+          echo "REQUIRED_JOBS: $REQUIRED_JOBS"
+          echo "REQUIRED_REGEXPS: $REQUIRED_REGEXPS"
+          python3 tools/testing/gatekeeper/jobs.py
+          exit $?
+        shell: /usr/bin/bash -x {0}

@@ -1,0 +1,33 @@
+required_tests:
+  # Always required tests
+  - Commit Message Check
+required_regexps:
+  # Always required regexps
+
+paths:
+  # Mapping of path (python) regexps to set-of-tests (sort by order of importance)
+  # CI
+  - "^ci/": []
+  - "^tools/testing/": []
+  - "\\.github/workflows/": []
+  # Documentation
+  - "\\.rst$": ["build"]
+  - "\\.md$": ["build"]
+  # Sources
+  - "^src/": ["static", "build", "test"]
+
+mapping:
+  # Mapping of set-of-tests to required test names and/or test name regexps
+  test:
+    # Checks the basic functional tests work
+    regexps: ".*run-basic-amd64-tests.*|.*run-metrics-tests.*"
+    names:
+      - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-ppc64le / run-k8s-tests (qemu, kubeadm)
+      - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-aks / run-k8s-tests (ubuntu, qemu, small)
+      - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-with-crio-on-garm / run-k8s-tests (qemu, k0s, garm-ubuntu-2204)
+  build:
+    # Checks that the kata-containers static tarball is created
+    regexps: ".*build-kata-static-tarball.*"
+  static:
+    # Checks that static checks are passing
+    regexps: ".*build-checks.*"
