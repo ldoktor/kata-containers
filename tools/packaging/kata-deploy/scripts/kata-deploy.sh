@@ -491,41 +491,57 @@ function configure_containerd_runtime() {
 	local configuration="configuration-${shim}"
 	local pluginid=cri
 
-	# if we are running k0s auto containerd.toml generation, the base template is by default version 2
-	# we can safely assume to reference the newer version of cri
-	if grep -q "version = 2\>" $containerd_conf_file || [ "$1" == "k0s-worker" ] || [ "$1" == "k0s-controller" ]; then
-		pluginid=\"io.containerd.grpc.v1.cri\"
-	fi
+	local tmp_containerd_config="$(mktemp)"
 
-	local runtime_table=".plugins.${pluginid}.containerd.runtimes.\"${runtime}\""
-	local runtime_options_table="${runtime_table}.options"
-	local runtime_type=\"io.containerd."${runtime}".v2\"
-	local runtime_config_path=\"$(get_kata_containers_config_path "${shim}")/${configuration}.toml\"
-	local runtime_path=\"$(get_kata_containers_runtime_path "${shim}")\"
-	
-	tomlq -i -t $(printf '%s.runtime_type=%s' ${runtime_table} ${runtime_type}) ${containerd_conf_file}
-	tomlq -i -t $(printf '%s.runtime_path=%s' ${runtime_table} ${runtime_path}) ${containerd_conf_file}
-	tomlq -i -t $(printf '%s.privileged_without_host_devices=true' ${runtime_table}) ${containerd_conf_file}
-	tomlq -i -t $(printf '%s.pod_annotations=["io.katacontainers.*"]' ${runtime_table}) ${containerd_conf_file}
-	tomlq -i -t $(printf '%s.ConfigPath=%s' ${runtime_options_table} ${runtime_config_path}) ${containerd_conf_file}
-	
-	if [ "${DEBUG}" == "true" ]; then
-		tomlq -i -t '.debug.level = "debug"' ${containerd_conf_file}
-	fi
+	( for i in {{1..10}}; do
+		local containerd_config_pre="$(cat "${containerd_conf_file}")"
+		echo "${containerd_config_pre}" > "$tmp_containerd_config"
 
-	if [ -n "${SNAPSHOTTER_HANDLER_MAPPING}" ]; then
-		for m in ${snapshotters[@]}; do
-			key="${m%$snapshotters_delimiter*}"
+		# if we are running k0s auto containerd.toml generation, the base template is by default version 2
+		# we can safely assume to reference the newer version of cri
+		if grep -q "version = 2\>" $tmp_containerd_config || [ "$1" == "k0s-worker" ] || [ "$1" == "k0s-controller" ]; then
+			pluginid=\"io.containerd.grpc.v1.cri\"
+		fi
 
-			if [ "${key}" != "${shim}" ]; then
-				continue
-			fi
+		local runtime_table=".plugins.${pluginid}.containerd.runtimes.\"${runtime}\""
+		local runtime_options_table="${runtime_table}.options"
+		local runtime_type=\"io.containerd."${runtime}".v2\"
+		local runtime_config_path=\"$(get_kata_containers_config_path "${shim}")/${configuration}.toml\"
+		local runtime_path=\"$(get_kata_containers_runtime_path "${shim}")\"
 
-			value="${m#*$snapshotters_delimiter}"
-			tomlq -i -t $(printf '%s.snapshotter="%s"' ${runtime_table} ${value}) ${containerd_conf_file}
-			break
-		done
-	fi
+		tomlq -i -t $(printf '%s.runtime_type=%s' ${runtime_table} ${runtime_type}) ${tmp_containerd_config}
+		tomlq -i -t $(printf '%s.runtime_path=%s' ${runtime_table} ${runtime_path}) ${tmp_containerd_config}
+		tomlq -i -t $(printf '%s.privileged_without_host_devices=true' ${runtime_table}) ${tmp_containerd_config}
+		tomlq -i -t $(printf '%s.pod_annotations=["io.katacontainers.*"]' ${runtime_table}) ${tmp_containerd_config}
+		tomlq -i -t $(printf '%s.ConfigPath=%s' ${runtime_options_table} ${runtime_config_path}) ${tmp_containerd_config}
+
+		if [ "${DEBUG}" == "true" ]; then
+			tomlq -i -t '.debug.level = "debug"' ${tmp_containerd_config}
+		fi
+
+		if [ -n "${SNAPSHOTTER_HANDLER_MAPPING}" ]; then
+			for m in ${snapshotters[@]}; do
+				key="${m%$snapshotters_delimiter*}"
+
+				if [ "${key}" != "${shim}" ]; then
+					continue
+				fi
+
+				value="${m#*$snapshotters_delimiter}"
+				tomlq -i -t $(printf '%s.snapshotter="%s"' ${runtime_table} ${value}) ${tmp_containerd_config}
+				break
+			done
+		fi
+
+		# Only update the file when the original one did not change
+		if [ "$(cat "${containerd_conf_file}")" == "$containerd_config_pre" ]; then
+			mv "$tmp_containerd_config" "$containerd_conf_file"
+			exit 0
+		fi
+		sleep $(($RANDOM / 1000))
+	done ) || { echo "Failed to configure snapshotter in 10 iterations, is someone else modifying the config?"; exit -1; }
+
+	rm -f "$tmp_containerd_config"
 }
 
 function configure_containerd() {
