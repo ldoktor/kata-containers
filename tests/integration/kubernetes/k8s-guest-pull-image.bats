@@ -49,14 +49,15 @@ setup() {
     kubectl delete -f "$runc_pod_config"
 
     # 2. Create one kata pod with the $unencrypted_image image and nydus annotation
-    kata_pod_with_nydus_config="$(new_pod_config "$unencrypted_image" "kata-${KATA_HYPERVISOR}")"
+    local runtime_class="${RUNTIME_CLASS_NAME:-kata-${KATA_HYPERVISOR}}"
+    kata_pod_with_nydus_config="$(new_pod_config "$unencrypted_image" "${runtime_class}")"
     set_node "$kata_pod_with_nydus_config" "$node"
     set_container_command "$kata_pod_with_nydus_config" "0" "sleep" "30"
 
     # Set annotation to pull image in guest
     set_metadata_annotation "$kata_pod_with_nydus_config" \
         "io.containerd.cri.runtime-handler" \
-        "kata-${KATA_HYPERVISOR}"
+        "${runtime_class}"
 
     # For debug sake
     echo "Pod $kata_pod_with_nydus_config file:"
@@ -74,14 +75,15 @@ setup() {
     # However, the unpacked size of image "ghcr.io/confidential-containers/test-container:rust-1.79.0" is 1.41GB.
     # It will fail to run the pod with pulling the image in the memory in the guest by default.
 
-    pod_config="$(new_pod_config "$image_pulled_time_less_than_default_time" "kata-${KATA_HYPERVISOR}")"
+    local runtime_class="${RUNTIME_CLASS_NAME:-kata-${KATA_HYPERVISOR}}"
+    pod_config="$(new_pod_config "$image_pulled_time_less_than_default_time" "${runtime_class}")"
     set_node "$pod_config" "$node"
     set_container_command "$pod_config" "0" "sleep" "30"
 
     # Set annotation to pull image in guest
     set_metadata_annotation "${pod_config}" \
         "io.containerd.cri.runtime-handler" \
-        "kata-${KATA_HYPERVISOR}"
+        "${runtime_class}"
 
     # For debug sake
     echo "Pod $pod_config file:"
@@ -129,9 +131,10 @@ setup() {
         "${create_container_timeout}"
 
     # Set annotation to pull image in guest
+    local runtime_class="${RUNTIME_CLASS_NAME:-kata-${KATA_HYPERVISOR}}"
     set_metadata_annotation "${pod_config}" \
         "io.containerd.cri.runtime-handler" \
-        "kata-${KATA_HYPERVISOR}"
+        "${runtime_class}"
 
     # For debug sake
     echo "Pod $pod_config file:"
@@ -170,9 +173,10 @@ setup() {
         "${create_container_timeout}"
 
     # Set annotation to pull image in guest
+    local runtime_class="${RUNTIME_CLASS_NAME:-kata-${KATA_HYPERVISOR}}"
     set_metadata_annotation "${pod_config}" \
         "io.containerd.cri.runtime-handler" \
-        "kata-${KATA_HYPERVISOR}"
+        "${runtime_class}"
 
     # For debug sake
     echo "Pod $pod_config file:"
@@ -227,9 +231,10 @@ setup() {
         "${create_container_timeout}"
 
     # Set annotation to pull image in guest
+    local runtime_class="${RUNTIME_CLASS_NAME:-kata-${KATA_HYPERVISOR}}"
     set_metadata_annotation "${pod_config}" \
         "io.containerd.cri.runtime-handler" \
-        "kata-${KATA_HYPERVISOR}"
+        "${runtime_class}"
 
     # For debug sake
     echo "Pod $pod_config file:"
