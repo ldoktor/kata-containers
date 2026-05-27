@@ -30,8 +30,10 @@ setup() {
 	# Start the service/deployment/pod
 	kubectl apply -f "${pod_config_dir}/pod-confidential-unencrypted.yaml"
 
-	# Retrieve pod name, wait for it to come up, retrieve pod ip
-	pod_name=$(kubectl get pod -o wide | grep "confidential-unencrypted" | awk '{print $1;}')
+	# Wait for the deployment to create a pod, then retrieve its name
+	kubectl rollout status deployment/confidential-unencrypted --timeout="${timeout}"
+	pod_name=$(kubectl get pod -l app=confidential-unencrypted -o jsonpath='{.items[0].metadata.name}')
+	[ -n "${pod_name}" ] || die "Failed to get pod name"
 
 	# Check pod creation
 	kubectl wait --for=condition=Ready --timeout=$timeout pod "${pod_name}"
@@ -43,7 +45,7 @@ setup() {
 	coco_enabled=""
 	if [[ "${COCO_VERIFY_METHOD}" == "exec" ]]; then
 		for i in {1..6}; do
-			coco_enabled=$(kubectl exec "${pod_name}" -- bash -c "${verify_cmd}" 2>/dev/null) && break
+			coco_enabled=$(kubectl exec "${pod_name}" -- sh -c "${verify_cmd}" 2>/dev/null) && break
 			warn "kubectl exec attempt ${i} failed, retrying..."
 			sleep 5
 		done
