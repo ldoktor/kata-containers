@@ -27,6 +27,12 @@ function setup_unencrypted_confidential_pod() {
 		sed -i "s/-nightly/-${GH_PR_NUMBER}/" "${pod_config_dir}/pod-confidential-unencrypted.yaml"
 	fi
 
+	# Allow RUNTIME_CLASS_NAME override (e.g., for OpenShift "kata-cc")
+	if [[ -n "${RUNTIME_CLASS_NAME:-}" ]] && command -v yq >/dev/null 2>&1; then
+		yq -i ".spec.template.spec.runtimeClassName = \"${RUNTIME_CLASS_NAME}\"" \
+			"${pod_config_dir}/pod-confidential-unencrypted.yaml"
+	fi
+
 	# Set permissions on private key file
 	sudo chmod 600 "${SSH_KEY_FILE}"
 }

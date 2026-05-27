@@ -10,6 +10,9 @@ load "${BATS_TEST_DIRNAME}/../../common.bash"
 load "${BATS_TEST_DIRNAME}/confidential_common.sh"
 load "${BATS_TEST_DIRNAME}/tests_common.sh"
 
+export KATA_HYPERVISOR="${KATA_HYPERVISOR:-qemu}"
+export RUNTIME_CLASS_NAME="${RUNTIME_CLASS_NAME:-kata-${KATA_HYPERVISOR}}"
+
 setup() {
 	if ! is_confidential_hardware; then
 		skip "Test is supported only on confidential hardware (which ${KATA_HYPERVISOR} is not)"
