@@ -11,7 +11,7 @@ load "${BATS_TEST_DIRNAME}/confidential_common.sh"
 export KBS="${KBS:-false}"
 export test_key="aatest"
 export KATA_HYPERVISOR="${KATA_HYPERVISOR:-qemu}"
-export RUNTIME_CLASS_NAME="kata-${KATA_HYPERVISOR}"
+export RUNTIME_CLASS_NAME="${RUNTIME_CLASS_NAME:-kata-${KATA_HYPERVISOR}}"
 export AA_KBC="${AA_KBC:-cc_kbc}"
 
 setup() {
