@@ -220,7 +220,8 @@ assert_pod_fail() {
 		terminated_reason=$(kubectl get pod "${pod_name}" \
 			-o jsonpath='{.status.containerStatuses[0].state.terminated.reason}' 2>/dev/null || true)
 		# BackOff/CrashLoopBackOff = container repeatedly failed; RunContainerError = e.g. image pull in guest failed
-		if [[ "${waiting_reason}" == *BackOff* ]] || [[ "${waiting_reason}" == *RunContainerError* ]]; then
+		# CreateContainerError = container creation failed (e.g. image policy rejection)
+		if [[ "${waiting_reason}" == *BackOff* ]] || [[ "${waiting_reason}" == *RunContainerError* ]] || [[ "${waiting_reason}" == *CreateContainerError* ]]; then
 			return 0
 		fi
 		if [[ "${terminated_reason}" == "StartError" ]] || [[ "${terminated_reason}" == "Error" ]]; then
