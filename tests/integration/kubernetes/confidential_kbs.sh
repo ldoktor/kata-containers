@@ -42,13 +42,13 @@ readonly KBS_ADMIN_TOKEN_FILE="${KBS_ADMIN_TOKEN_FILE:-/opt/trustee/install/kbs-
 readonly KBS_BOOTSTRAP_SECRET="trustee-bootstrap-user-keys"
 
 # The k8s namespace where the kbs service is deployed
-readonly KBS_NS="coco-trustee"
+KBS_NS="${KBS_NS:-coco-trustee}"
 # The kbs service name (Helm chart names it <release>-kbs)
-readonly KBS_SVC_NAME="trustee-kbs"
+KBS_SVC_NAME="${KBS_SVC_NAME:-trustee-kbs}"
 # The kbs service exposed via NodePort (Helm chart names it <svc>-nodeport)
-readonly KBS_NODEPORT_SVC_NAME="trustee-kbs-nodeport"
+KBS_NODEPORT_SVC_NAME="${KBS_NODEPORT_SVC_NAME:-${KBS_SVC_NAME}-nodeport}"
 # The kbs ingress name
-readonly KBS_INGRESS_NAME="trustee-kbs"
+KBS_INGRESS_NAME="${KBS_INGRESS_NAME:-trustee-kbs}"
 # Workdir for installing snphost
 readonly SNPHOST_DIR="/tmp/snphost-workdir"
 # Offline VCEK store. The chart mounts it at the verifier's built-in
@@ -129,7 +129,7 @@ kbs_set_resources_policy() {
 		return 1
 	fi
 
-	kbs-client --url "$(kbs_k8s_svc_http_addr)" config \
+	kbs-client --url "${KBS_CLIENT_URL:-$(kbs_k8s_svc_http_addr)}" config \
 		--admin-token-file "${KBS_ADMIN_TOKEN_FILE}" \
 		set-resource-policy \
 		--policy-file "${file}"
@@ -144,7 +144,7 @@ kbs_set_resources_policy() {
 #	$1 - config command to run
 #
 kbs_config_command() {
-	kbs-client --url "$(kbs_k8s_svc_http_addr)" config \
+	kbs-client --url "${KBS_CLIENT_URL:-$(kbs_k8s_svc_http_addr)}" config \
 		--admin-token-file "${KBS_ADMIN_TOKEN_FILE}" \
 		"$@"
 }
@@ -238,7 +238,7 @@ kbs_set_resource_from_file() {
 	path+="${type}/"
 	path+="${tag}"
 
-	kbs-client --url "$(kbs_k8s_svc_http_addr)" config \
+	kbs-client --url "${KBS_CLIENT_URL:-$(kbs_k8s_svc_http_addr)}" config \
 		--admin-token-file "${KBS_ADMIN_TOKEN_FILE}" \
 		set-resource \
 		--path "${path}" --resource-file "${file}"
