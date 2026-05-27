@@ -22,10 +22,6 @@ setup() {
 
 	setup_common || die "setup_common failed"
 
-	# Consumed by the pod templates below through envsubst.
-	RUNTIME_CLASS_NAME="$(get_test_runtime_class)"
-	export RUNTIME_CLASS_NAME
-
 	# install SNP measurement dependencies
 	if [[ "${KATA_HYPERVISOR}" == *snp* ]]; then
 		ensure_sev_snp_measure
@@ -45,7 +41,8 @@ setup() {
 	export K8S_TEST_YAML="${pod_config_dir}/${POD_TEMPLATE_BASENAME}.yaml"
 
 	# Substitute the runtime class name variable in the YAML template
-	envsubst '${RUNTIME_CLASS_NAME}' < "${pod_yaml_in}" > "${K8S_TEST_YAML}"
+	RUNTIME_CLASS_NAME="${RUNTIME_CLASS_NAME:-$(get_test_runtime_class)}" \
+		envsubst '${RUNTIME_CLASS_NAME}' < "${pod_yaml_in}" > "${K8S_TEST_YAML}"
 
 	# Schedule on a known node so that later it can print the system's logs for
 	# debugging.
