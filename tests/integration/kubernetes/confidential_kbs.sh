@@ -25,13 +25,13 @@ readonly COCO_TRUSTEE_DIR="/tmp/trustee"
 # Where the kbs sources will be cloned
 readonly COCO_KBS_DIR="${COCO_TRUSTEE_DIR}/kbs"
 # The k8s namespace where the kbs service is deployed
-readonly KBS_NS="coco-tenant"
+KBS_NS="${KBS_NS:-coco-tenant}"
 # The private key file used for CLI authentication
-readonly KBS_PRIVATE_KEY="${KBS_PRIVATE_KEY:-/opt/trustee/install/kbs.key}"
+KBS_PRIVATE_KEY="${KBS_PRIVATE_KEY:-/opt/trustee/install/kbs.key}"
 # The kbs service name
-readonly KBS_SVC_NAME="kbs"
+KBS_SVC_NAME="${KBS_SVC_NAME:-kbs}"
 # The kbs ingress name
-readonly KBS_INGRESS_NAME="kbs"
+KBS_INGRESS_NAME="${KBS_INGRESS_NAME:-kbs}"
 # Workdir for installing snphost
 readonly SNPHOST_DIR="/tmp/snphost-workdir"
 
@@ -109,7 +109,7 @@ kbs_set_resources_policy() {
 		return 1
 	fi
 
-	kbs-client --url "$(kbs_k8s_svc_http_addr)" config \
+	kbs-client --url "${KBS_CLIENT_URL:-$(kbs_k8s_svc_http_addr)}" config \
 		--auth-private-key "${KBS_PRIVATE_KEY}" set-resource-policy \
 		--policy-file "${file}"
 }
@@ -121,7 +121,7 @@ kbs_set_resources_policy() {
 #	$1 - config command to run
 #
 kbs_config_command() {
-	kbs-client --url "$(kbs_k8s_svc_http_addr)" config \
+	kbs-client --url "${KBS_CLIENT_URL:-$(kbs_k8s_svc_http_addr)}" config \
                 --auth-private-key "${KBS_PRIVATE_KEY}" "$@"
 }
 
@@ -214,7 +214,7 @@ kbs_set_resource_from_file() {
 	path+="${type}/"
 	path+="${tag}"
 
-	kbs-client --url "$(kbs_k8s_svc_http_addr)" config \
+	kbs-client --url "${KBS_CLIENT_URL:-$(kbs_k8s_svc_http_addr)}" config \
 		--auth-private-key "${KBS_PRIVATE_KEY}" set-resource \
 		--path "${path}" --resource-file "${file}"
 }
