@@ -91,6 +91,11 @@ get_pod_config_dir() {
 # same MULTI_INSTALL_SUFFIX kata-deploy was given rather than assuming the plain
 # one, which is not deployed at all in that case.
 get_test_runtime_class() {
+	if [[ -n "${RUNTIME_CLASS_NAME:-}" ]]; then
+		echo "${RUNTIME_CLASS_NAME}"
+		return
+	fi
+
 	if [[ -z "${test_runtime_class:-}" ]]; then
 		local base="kata-${KATA_HYPERVISOR}${MULTI_INSTALL_SUFFIX:+-${MULTI_INSTALL_SUFFIX}}"
 		local mode="${KATA_TEST_RUNTIME_CLASS_MODE:-plain}"
