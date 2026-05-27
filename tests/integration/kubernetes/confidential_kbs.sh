@@ -4,7 +4,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Provides a library to deal with the CoCo KBS
+# Provides a library to deal with the CoCo KBS.
+#
+# KBS resources can be managed via two backends, selected by KBS_MANAGEMENT:
+#   client   - (default) uses kbs-client CLI against the KBS admin API.
+#              Used when KBS is deployed directly and the admin API is enabled.
+#   operator - uses K8s Secrets + ConfigMaps via the Trustee operator CRDs.
+#              Used on OpenShift with Red Hat build of Trustee, where the admin
+#              API is disabled and resources are managed declaratively.
 #
 set -e
 
@@ -34,6 +41,9 @@ KBS_SVC_NAME="${KBS_SVC_NAME:-kbs}"
 KBS_INGRESS_NAME="${KBS_INGRESS_NAME:-kbs}"
 # Workdir for installing snphost
 readonly SNPHOST_DIR="/tmp/snphost-workdir"
+
+# ── High-level policy helpers (shared across backends) ───────────────────────
+# These call kbs_set_resources_policy() which is provided by the active backend.
 
 # Set "allow all" policy to resources.
 #
@@ -96,34 +106,8 @@ kbs_set_cpu0_resource_policy() {
 	return "${rc}"
 }
 
-# Set resources policy.
-#
-# Parameters:
-#	$1 - path to policy file
-#
-kbs_set_resources_policy() {
-	local file="${1:-}"
-
-	if [[ ! -f "${file}" ]]; then
-		>&2 echo "ERROR: policy file '${file}' does not exist"
-		return 1
-	fi
-
-	kbs-client --url "${KBS_CLIENT_URL:-$(kbs_k8s_svc_http_addr)}" config \
-		--auth-private-key "${KBS_PRIVATE_KEY}" set-resource-policy \
-		--policy-file "${file}"
-}
-
-# Execute an admin command via the KBS client using the correct
-# URI and admin authentication key.
-#
-# Parameters:
-#	$1 - config command to run
-#
-kbs_config_command() {
-	kbs-client --url "${KBS_CLIENT_URL:-$(kbs_k8s_svc_http_addr)}" config \
-                --auth-private-key "${KBS_PRIVATE_KEY}" "$@"
-}
+# ── Resource helpers (shared across backends) ────────────────────────────────
+# These call kbs_set_resource_from_file() which is provided by the active backend.
 
 # Set resource data in base64 encoded.
 #
@@ -187,315 +171,7 @@ kbs_set_resource() {
 	return "${rc}"
 }
 
-# Set resource, read data from file.
-#
-# Parameters:
-#	$1 - repository name (optional)
-#	$2 - resource type (mandatory)
-#	$3 - tag (mandatory)
-#	$4 - resource data
-#
-kbs_set_resource_from_file() {
-	local repository="${1:-}"
-	local type="${2:-}"
-	local tag="${3:-}"
-	local file="${4:-}"
-
-	if [[ -z "${type}" || -z "${tag}" ]]; then
-		>&2 echo "ERROR: missing type='${type}' and/or tag='${tag}' parameters"
-		return 1
-	elif [[ ! -f "${file}" ]]; then
-		>&2 echo "ERROR: resource file '${file}' does not exist"
-		return 1
-	fi
-
-	local path=""
-	[[ -n "${repository}" ]] && path+="${repository}/"
-	path+="${type}/"
-	path+="${tag}"
-
-	kbs-client --url "${KBS_CLIENT_URL:-$(kbs_k8s_svc_http_addr)}" config \
-		--auth-private-key "${KBS_PRIVATE_KEY}" set-resource \
-		--path "${path}" --resource-file "${file}"
-}
-
-# Build and install the kbs-client binary, unless it is already present.
-#
-kbs_install_cli() {
-	command -v kbs-client >/dev/null && return
-
-	source /etc/os-release || source /usr/lib/os-release
-	case "${ID}" in
-		debian|ubuntu)
-			local pkgs="build-essential pkg-config libssl-dev"
-
-			sudo apt-get update -y
-			# shellcheck disable=2086
-			sudo apt-get install -y ${pkgs}
-			;;
-		centos)
-			local pkgs="make"
-
-			# shellcheck disable=2086,2248
-			sudo dnf install -y ${pkgs}
-			;;
-		*)
-			>&2 echo "ERROR: running on unsupported distro"
-			return 1
-			;;
-	esac
-
-	# Mininum required version to build the client (read from versions.yaml)
-	local rust_version
-	ensure_yq
-	rust_version=$(get_from_kata_deps ".externals.coco-trustee.toolchain")
-	# Currently kata version from version.yaml is 1.72.0
-	# which doesn't match the requirement, so let's pass
-	# the required version.
-	_ensure_rust "${rust_version}"
-
-	pushd "${COCO_KBS_DIR}"
-	# Compile with sample features to bypass attestation.
-	make CLI_FEATURES=sample_only cli
-	sudo make install-cli
-	popd
-}
-
-kbs_uninstall_cli() {
-	if [[ -d "${COCO_KBS_DIR}" ]]; then
-		pushd "${COCO_KBS_DIR}"
-		sudo make uninstall
-		popd
-	else
-		echo "${COCO_KBS_DIR} does not exist in the machine, skip uninstalling the kbs cli"
-	fi
-}
-
-# Ensure ~/.cicd/venv exists and activate it in the current shell.
-ensure_cicd_python_venv() {
-	local venv_path="${HOME}/.cicd/venv"
-	if [[ ! -f "${venv_path}/bin/activate" ]]; then
-		# NIM tests need Python 3.10 via pyenv; attestation uses system python3. Both are fine.
-		if command -v pyenv &>/dev/null; then
-			export PYENV_ROOT="${HOME}/.pyenv"
-			[[ -d "${PYENV_ROOT}/bin" ]] && export PATH="${PYENV_ROOT}/bin:${PATH}"
-			eval "$(pyenv init - bash)"
-		fi
-		mkdir -p "${HOME}/.cicd"
-		python3 -m venv "${venv_path}"
-	fi
-	# shellcheck disable=SC1091
-	source "${venv_path}/bin/activate"
-}
-
-# Ensure the sev-snp-measure utility is installed.
-#
-ensure_sev_snp_measure() {
-	command -v sev-snp-measure >/dev/null && return
-
-	ensure_cicd_python_venv
-	pip install sev-snp-measure
-}
-
-# Ensure that snphost utility is installed
-#
-ensure_snphost() {
-	command -v snphost >/dev/null && return
-
-	git clone https://github.com/virtee/snphost.git "${SNPHOST_DIR}"
-	pushd "${SNPHOST_DIR}"
-
-	_ensure_rust "1.85.0"
-	cargo build --release
-	sudo install -m 755 target/release/snphost /usr/local/bin/
-
-	popd
-	rm -rf "${SNPHOST_DIR}"
-}
-
-# Delete the kbs on Kubernetes
-#
-# Note: assume the kbs sources were cloned to $COCO_TRUSTEE_DIR
-#
-function kbs_k8s_delete() {
-	pushd "${COCO_KBS_DIR}"
-	if [[ "${KATA_HYPERVISOR}" = qemu-se* ]]; then
-		kubectl delete -k config/kubernetes/overlays/ibm-se
-	else
-		kubectl delete -k config/kubernetes/overlays/
-	fi
-
-	# Verify that KBS namespace resources were properly deleted
-	cmd="kubectl get all -n ${KBS_NS} 2>&1 | grep 'No resources found'"
-	waitForProcess "120" "30" "${cmd}"
-	popd
-}
-
-# Deploy the kbs on Kubernetes
-#
-# Parameters:
-#	$1 - apply the specificed ingress handler to expose the service externally
-#
-function kbs_k8s_deploy() {
-	local image
-	local image_tag
-	local ingress=${1:-}
-	local repo
-	local svc_host
-	local timeout
-	local kbs_ip
-	local kbs_port
-	local version
-
-	# yq is needed by get_from_kata_deps
-	ensure_yq
-
-	# Read from versions.yaml
-	repo=$(get_from_kata_deps ".externals.coco-trustee.url")
-	version=$(get_from_kata_deps ".externals.coco-trustee.version")
-	image=$(get_from_kata_deps ".externals.coco-trustee.image")
-	image_tag=$(get_from_kata_deps ".externals.coco-trustee.image_tag")
-
-	# The ingress handler for AKS relies on the cluster's name which in turn
-	# contain the HEAD commit of the kata-containers repository (supposedly the
-	# current directory). It will be needed to save the cluster's name before
-	# it switches to the kbs repository and get a wrong HEAD commit.
-	if [[ -z "${AKS_NAME:-}" ]]; then
-		AKS_NAME=$(_print_cluster_name)
-		export AKS_NAME
-	fi
-
-	if [[ -d "${COCO_TRUSTEE_DIR}" ]]; then
-		rm -rf "${COCO_TRUSTEE_DIR}"
-	fi
-
-	echo "::group::Clone the kbs sources"
-	git clone --depth 1 "${repo}" "${COCO_TRUSTEE_DIR}"
-	pushd "${COCO_TRUSTEE_DIR}"
-	git fetch --depth=1 origin "${version}"
-	git checkout FETCH_HEAD -b kbs_$$
-	popd
-	echo "::endgroup::"
-
-	pushd "${COCO_KBS_DIR}/config/kubernetes/"
-
-	# Tests should fill kbs resources later, however, the deployment
-	# expects at least one secret served at install time.
-	echo "somesecret" > overlays/key.bin
-
-	# For qemu-se* runtime, prepare the necessary resources
-	if [[ "${KATA_HYPERVISOR}" == qemu-se* ]]; then
-		mv overlays/key.bin overlays/ibm-se/key.bin
-		prepare_credentials_for_qemu_se
-		# SE_SKIP_CERTS_VERIFICATION should be set to true
-		# to skip the verification of the certificates
-		sed -i "s/false/true/g" overlays/ibm-se/patch.yaml
-	fi
-
-	echo "::group::Update the kbs container image"
-	install_kustomize
-	pushd base
-	kustomize edit set image "kbs-container-image=${image}:${image_tag}"
-	popd
-	echo "::endgroup::"
-	[[ -n "${ingress}" ]] && _handle_ingress "${ingress}"
-
-	echo "::group::Deploy the KBS"
-	if [[ "${KATA_HYPERVISOR}" = "qemu-tdx" ]]; then
-		if [[ -n "${HTTPS_PROXY}" ]]; then
-			# Ideally this should be something kustomizable on trustee side.
-			#
-			# However, for now let's take the bullet and do it here, and revert this as
-			# soon as https://github.com/confidential-containers/trustee/issues/567 is
-			# solved.
-			pushd "${COCO_KBS_DIR}/config/kubernetes/base/"
-				ensure_yq
-
-				yq e ".spec.template.spec.containers[0].env += [{\"name\": \"https_proxy\", \"value\": \"${HTTPS_PROXY}\"}]" -i deployment.yaml
-			popd
-		fi
-	fi
-
-	./deploy-kbs.sh
-
-	# Check the private key used to install the KBS exist and save it in a
-	# well-known location. That's the access key used by the kbs-client.
-	local install_key="${PWD}/base/kbs.key"
-	if [[ ! -f "${install_key}" ]]; then
-		echo "ERROR: KBS private key not found at ${install_key}"
-		return 1
-	fi
-	sudo mkdir -p "$(dirname "${KBS_PRIVATE_KEY}")"
-	sudo cp -f "${install_key}" "${KBS_PRIVATE_KEY}"
-
-	popd
-
-	if ! waitForProcess "120" "10" "kubectl -n \"${KBS_NS}\" get pods | \
-		grep -q '^kbs-.*Running.*'"; then
-		echo "ERROR: KBS service pod isn't running"
-		echo "::group::DEBUG - describe kbs deployments"
-		kubectl -n "${KBS_NS}" get deployments || true
-		echo "::endgroup::"
-		echo "::group::DEBUG - describe kbs pod"
-		kubectl -n "${KBS_NS}" describe pod -l app=kbs || true
-		echo "::endgroup::"
-		echo "::group::DEBUG - kbs logs"
-		kubectl -n "${KBS_NS}" logs -l app=kbs || true
-		echo "::endgroup::"
-		return 1
-	fi
-	echo "::endgroup::"
-
-	echo "::group::Post deploy actions"
-	_post_deploy "${ingress}"
-	echo "::endgroup::"
-
-	# By default, the KBS service is reachable within the cluster only,
-	# thus the following healthy checker should run from a pod. So start a
-	# debug pod where it will try to get a response from the service. The
-	# expected response is '404 Not Found' because it will request an endpoint
-	# that does not exist.
-	#
-	echo "::group::Check the service healthy"
-	kbs_ip=$(kubectl get -o jsonpath='{.spec.clusterIP}' svc "${KBS_SVC_NAME}" -n "${KBS_NS}" 2>/dev/null)
-	kbs_port=$(kubectl get -o jsonpath='{.spec.ports[0].port}' svc "${KBS_SVC_NAME}" -n "${KBS_NS}" 2>/dev/null)
-
-	local pod=kbs-checker-$$
-	kubectl run "${pod}" --image=quay.io/prometheus/busybox --restart=Never -- \
-		sh -c "wget -O- --timeout=60 \"${kbs_ip}:${kbs_port}\" || true"
-	if ! waitForProcess "60" "10" "kubectl logs \"${pod}\" 2>/dev/null | grep -q \"404 Not Found\""; then
-		echo "ERROR: KBS service is not responding to requests"
-		echo "::group::DEBUG - kbs logs"
-		kubectl -n "${KBS_NS}" logs -l app=kbs || true
-		echo "::endgroup::"
-		kubectl delete pod "${pod}"
-		return 1
-	fi
-	kubectl delete pod "${pod}"
-	echo "KBS service respond to requests"
-	echo "::endgroup::"
-
-	if [[ -n "${ingress}" ]]; then
-		echo "::group::Check the kbs service is exposed"
-		svc_host=$(kbs_k8s_svc_http_addr)
-		if [[ -z "${svc_host}" ]]; then
-			echo "ERROR: service host not found"
-			return 1
-		fi
-
-		# AZ DNS can take several minutes to update its records so that
-		# the host name will take a while to start resolving.
-		timeout=350
-		echo "Trying to connect at ${svc_host}. Timeout=${timeout}"
-		if ! waitForProcess "${timeout}" "30" "curl -s -I \"${svc_host}\" | grep -q \"404 Not Found\""; then
-			echo "ERROR: service seems to not respond on ${svc_host} host"
-			curl -I "${svc_host}"
-			return 1
-		fi
-		echo "KBS service respond to requests at ${svc_host}"
-		echo "::endgroup::"
-	fi
-}
+# ── Service discovery (shared across backends) ──────────────────────────────
 
 # Return the kbs service public IP in case ingress is configured
 # otherwise the cluster IP.
@@ -504,7 +180,6 @@ kbs_k8s_svc_host() {
 	if kubectl get ingress -n "${KBS_NS}" 2>/dev/null | grep -q kbs; then
 		local host
 		local timeout=50
-		# The ingress IP address can take a while to show up.
 		SECONDS=0
 		while true; do
 			host=$(kubectl get ingress "${KBS_INGRESS_NAME}" -n "${KBS_NS}" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
@@ -522,12 +197,10 @@ kbs_k8s_svc_host() {
 	fi
 }
 
-# Return the kbs service port number. In case ingress is configured
-# it will return "80", otherwise the pod's service port.
+# Return the kbs service port number.
 #
 kbs_k8s_svc_port() {
 	if kubectl get ingress -n "${KBS_NS}" 2>/dev/null | grep -q kbs; then
-		# Assume served on default HTTP port 80
 		echo "80"
 	elif kubectl get svc "${KBS_SVC_NAME}" -n "${KBS_NS}" &>/dev/null; then
 		kubectl get svc "${KBS_SVC_NAME}" -n "${KBS_NS}" -o jsonpath='{.spec.ports[0].nodePort}'
@@ -552,7 +225,6 @@ kbs_k8s_svc_http_addr() {
 kbs_k8s_print_logs() {
 	local start_time="$1"
 
-	# Convert to iso time for kubectl
 	local iso_start_time
 	iso_start_time=$(date -d "${start_time}" --iso-8601=seconds)
 
@@ -561,12 +233,45 @@ kbs_k8s_print_logs() {
 	echo "::endgroup::"
 }
 
-# Ensure rust is installed in the host.
-#
-# It won't install rust if it's already present, however, if the current
-# version isn't greater or equal than the mininum required then it will
-# bail out with an error.
-#
+# ── Shared utilities ────────────────────────────────────────────────────────
+
+# Ensure ~/.cicd/venv exists and activate it in the current shell.
+ensure_cicd_python_venv() {
+	local venv_path="${HOME}/.cicd/venv"
+	if [[ ! -f "${venv_path}/bin/activate" ]]; then
+		if command -v pyenv &>/dev/null; then
+			export PYENV_ROOT="${HOME}/.pyenv"
+			[[ -d "${PYENV_ROOT}/bin" ]] && export PATH="${PYENV_ROOT}/bin:${PATH}"
+			eval "$(pyenv init - bash)"
+		fi
+		mkdir -p "${HOME}/.cicd"
+		python3 -m venv "${venv_path}"
+	fi
+	# shellcheck disable=SC1091
+	source "${venv_path}/bin/activate"
+}
+
+ensure_sev_snp_measure() {
+	command -v sev-snp-measure >/dev/null && return
+
+	ensure_cicd_python_venv
+	pip install sev-snp-measure
+}
+
+ensure_snphost() {
+	command -v snphost >/dev/null && return
+
+	git clone https://github.com/virtee/snphost.git "${SNPHOST_DIR}"
+	pushd "${SNPHOST_DIR}"
+
+	_ensure_rust "1.85.0"
+	cargo build --release
+	sudo install -m 755 target/release/snphost /usr/local/bin/
+
+	popd
+	rm -rf "${SNPHOST_DIR}"
+}
+
 _ensure_rust() {
 	rust_version=${1:-}
 
@@ -578,10 +283,6 @@ _ensure_rust() {
 	else
 		[[ -z "${rust_version}" ]] && return
 
-		# We don't want to mess with installation on bare-metal so
-		# if rust is installed then just check it's >= the required
-		# version.
-		#
 		local current_rust_version
 		current_rust_version="$(rustc --version | cut -d' ' -f2)"
 		if ! version_greater_than_equal "${current_rust_version}" \
@@ -592,12 +293,6 @@ _ensure_rust() {
 	fi
 }
 
-# Choose the appropriated ingress handler.
-#
-# To add a new handler, create a function named as _handle_ingress_NAME where
-# NAME is the handler name. This is enough for this method to pick up the right
-# implementation.
-#
 _handle_ingress() {
 	local ingress="$1"
 
@@ -609,8 +304,6 @@ _handle_ingress() {
 	"_handle_ingress_${ingress}"
 }
 
-# Implement the ingress handler for AKS.
-#
 _handle_ingress_aks() {
 	echo "::group::Enable approuting (application routing) add-on"
 	enable_cluster_approuting ""
@@ -619,8 +312,6 @@ _handle_ingress_aks() {
 	pushd "${COCO_KBS_DIR}/config/kubernetes/overlays/"
 
 	echo "::group::$(pwd)/ingress.yaml"
-	# We don't use a cluster DNS zone, instead get the ingress public IP,
-	# thus KBS_INGRESS_HOST is set empty.
 	KBS_INGRESS_CLASS="webapprouting.kubernetes.azure.com" \
 		KBS_INGRESS_HOST="\"\"" \
 		envsubst < ingress.yaml | tee ingress.yaml.tmp
@@ -631,32 +322,20 @@ _handle_ingress_aks() {
 	popd
 }
 
-# Implements the ingress handler for servernode
-#
 _handle_ingress_nodeport() {
-	# By exporting this variable the kbs deploy script will install the nodeport service
 	export DEPLOYMENT_DIR=nodeport
 }
 
-# Run further actions after the kbs was deployed, usually to apply further
-# configurations.
-#
 _post_deploy() {
 	local ingress="${1:-}"
 
 	if [[ "${ingress}" = "aks" ]]; then
-		# The AKS managed ingress controller defaults to two nginx pod
-		# replicas where both request 500m of CPU. On cluster made of small
-		# VMs (e.g. 2 vCPU) one of the pod might not even start. We need only
-		# one nginx, so patching the controller to keep only one replica.
 		echo "Patch the ingress controller to have only one replica of nginx"
 		waitForProcess "20" "5" \
 			"kubectl patch nginxingresscontroller/default -n app-routing-system --type=merge -p='{\"spec\":{\"scaling\": {\"minReplicas\": 1}}}'"
 	fi
 }
 
-# Prepare necessary resources for qemu-se runtime
-# Documentation: https://github.com/confidential-containers/trustee/tree/main/attestation-service/verifier/src/se
 prepare_credentials_for_qemu_se() {
 	echo "::group::Prepare credentials for qemu-se runtime"
 	if [[ -z "${IBM_SE_CREDS_DIR:-}" ]]; then
@@ -682,3 +361,8 @@ prepare_credentials_for_qemu_se() {
 	ls -R "${IBM_SE_CREDS_DIR}"
 	echo "::endgroup::"
 }
+
+# ── Load the active backend ─────────────────────────────────────────────────
+KBS_MANAGEMENT="${KBS_MANAGEMENT:-client}"
+# shellcheck disable=1090
+source "${kubernetes_dir}/confidential_kbs_${KBS_MANAGEMENT}.sh"
