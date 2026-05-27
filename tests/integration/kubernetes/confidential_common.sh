@@ -27,9 +27,11 @@ function setup_unencrypted_confidential_pod() {
 		sed -i "s/-nightly/-${GH_PR_NUMBER}/" "${pod_config_dir}/pod-confidential-unencrypted.yaml"
 	fi
 
-	# Allow RUNTIME_CLASS_NAME override (e.g., for OpenShift "kata-cc")
+	# Allow RUNTIME_CLASS_NAME override (e.g., for OpenShift "kata-cc").
+	# Use select() to only modify the Deployment — setting spec.template on
+	# the Service document causes strict-decoding errors on OpenShift.
 	if [[ -n "${RUNTIME_CLASS_NAME:-}" ]] && command -v yq >/dev/null 2>&1; then
-		yq -i ".spec.template.spec.runtimeClassName = \"${RUNTIME_CLASS_NAME}\"" \
+		yq -i "(select(.kind == \"Deployment\") | .spec.template.spec.runtimeClassName) = \"${RUNTIME_CLASS_NAME}\"" \
 			"${pod_config_dir}/pod-confidential-unencrypted.yaml"
 	fi
 
