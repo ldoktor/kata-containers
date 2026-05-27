@@ -13,6 +13,11 @@ load "${BATS_TEST_DIRNAME}/tests_common.sh"
 export KATA_HYPERVISOR="${KATA_HYPERVISOR:-qemu}"
 export RUNTIME_CLASS_NAME="${RUNTIME_CLASS_NAME:-kata-${KATA_HYPERVISOR}}"
 
+# COCO_VERIFY_METHOD controls how the TEE status is checked inside the pod.
+#   ssh  - (default) SSH into the pod using its cluster IP.
+#   exec - use kubectl exec (for environments without direct pod network access).
+COCO_VERIFY_METHOD="${COCO_VERIFY_METHOD:-ssh}"
+
 setup() {
 	if ! is_confidential_hardware; then
 		skip "Test is supported only on confidential hardware (which ${KATA_HYPERVISOR} is not)"
@@ -31,20 +36,32 @@ setup() {
 	# Check pod creation
 	kubectl wait --for=condition=Ready --timeout=$timeout pod "${pod_name}"
 
+	local verify_cmd
+	verify_cmd="$(get_remote_command_per_hypervisor)"
+	[ -n "${verify_cmd}" ] || die "No TEE verification command for ${KATA_HYPERVISOR}"
+
 	coco_enabled=""
-	for i in {1..6}; do
-		rm -f "${HOME}/.ssh/known_hosts"
-		if ! pod_ip=$(kubectl get pod -o wide | grep "confidential-unencrypted" | awk '{print $6;}'); then
-			warn "Failed to get pod IP address."
-		else
-			info "Pod IP address: ${pod_ip}"
-			coco_enabled=$(ssh -i ${SSH_KEY_FILE} -o "StrictHostKeyChecking no" -o "PasswordAuthentication=no" root@${pod_ip} "$(get_remote_command_per_hypervisor)" 2> /dev/null) && break
-			warn "Failed to connect to pod."
-		fi
-		sleep 5
-	done
+	if [[ "${COCO_VERIFY_METHOD}" == "exec" ]]; then
+		for i in {1..6}; do
+			coco_enabled=$(kubectl exec "${pod_name}" -- bash -c "${verify_cmd}" 2>/dev/null) && break
+			warn "kubectl exec attempt ${i} failed, retrying..."
+			sleep 5
+		done
+	else
+		for i in {1..6}; do
+			rm -f "${HOME}/.ssh/known_hosts"
+			if ! pod_ip=$(kubectl get pod -o wide | grep "confidential-unencrypted" | awk '{print $6;}'); then
+				warn "Failed to get pod IP address."
+			else
+				info "Pod IP address: ${pod_ip}"
+				coco_enabled=$(ssh -i ${SSH_KEY_FILE} -o "StrictHostKeyChecking no" -o "PasswordAuthentication=no" root@${pod_ip} "${verify_cmd}" 2> /dev/null) && break
+				warn "Failed to connect to pod."
+			fi
+			sleep 5
+		done
+	fi
 	[ -z "$coco_enabled" ] && die "Confidential compute is expected but not enabled."
-	info "ssh client output: ${coco_enabled}"
+	info "TEE verification output (${COCO_VERIFY_METHOD}): ${coco_enabled}"
 }
 
 teardown() {
