@@ -107,4 +107,9 @@ teardown() {
 	confidential_teardown_common "${node}" "${node_start_time:-}"
 	kubectl delete secret sealed-secret --ignore-not-found
 	kubectl delete secret not-sealed-secret --ignore-not-found
+
+	# Remove sealed-secret resource from KBS so test 1 starts clean
+	if type -t kbs_delete_resource &>/dev/null; then
+		kbs_delete_resource "default" "sealed-secret" "test" || true
+	fi
 }

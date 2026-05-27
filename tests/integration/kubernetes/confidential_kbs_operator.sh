@@ -115,6 +115,46 @@ kbs_set_resource_from_file() {
 	fi
 }
 
+# Delete a KBS resource Secret and unregister it from kbsSecretResources.
+#
+# This ensures kbs_set_resource_from_file will treat the next provision
+# as a fresh addition and trigger a rollout restart.
+#
+# Parameters:
+#	$1 - repository name (unused, for API compatibility)
+#	$2 - resource type (mandatory) — the Secret name
+#	$3 - tag (optional, unused — the entire Secret is deleted)
+#
+kbs_delete_resource() {
+	local type="${2:-}"
+
+	if [[ -z "${type}" ]]; then
+		>&2 echo "ERROR: missing type parameter"
+		return 1
+	fi
+
+	echo "Deleting KBS resource secret: ${type}"
+	kubectl delete secret "${type}" -n "${KBS_NS}" --ignore-not-found
+
+	# Remove from kbsSecretResources so the next kbs_set_resource_from_file
+	# treats it as new and triggers a rollout restart.
+	local current idx
+	current=$(kubectl get kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" \
+		-o jsonpath='{.spec.kbsSecretResources[*]}' 2>/dev/null || true)
+
+	idx=0
+	for name in ${current}; do
+		if [[ "${name}" == "${type}" ]]; then
+			echo "Removing '${type}' from kbsSecretResources (index ${idx})"
+			kubectl patch kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" \
+				--type=json \
+				-p="[{\"op\":\"remove\",\"path\":\"/spec/kbsSecretResources/${idx}\"}]" 2>/dev/null || true
+			break
+		fi
+		idx=$((idx + 1))
+	done
+}
+
 # Override policy helpers for operator-managed KBS.
 # The upstream sample policies (allow_all.rego, default.rego) reference
 # `data.plugin` which is populated by the kbs-client-deployed KBS but not
