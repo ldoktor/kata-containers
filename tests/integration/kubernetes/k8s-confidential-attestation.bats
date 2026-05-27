@@ -120,6 +120,11 @@ setup() {
 # Skipped on IBM SEL / qemu-se* because that environment returns an
 # affirming trust vector when verification completes successfully, even
 # without reference values.
+#
+# Also skipped with operator-managed KBS (e.g. Red Hat build of Trustee)
+# where the built-in AS verifies TDX evidence against Intel collateral
+# from PCCS and produces affirming trust claims without explicit
+# reference values — same behavior as IBM SEL.
 @test "Cannot get CDH resource when affirming policy is set without reference values" {
 
 	if [[ "${KATA_HYPERVISOR}" == qemu-se* ]]; then
@@ -127,6 +132,10 @@ setup() {
 		skip_reason+="completes successfully, even if no reference values are set. See "
 		skip_reason+="https://github.com/confidential-containers/trustee/blob/d4e317620c4039c89779b725f74974d8f005da66/attestation-service/src/ear_token/ear_default_policy_cpu.rego#L323-L339"
 		skip "${skip_reason}"
+	fi
+
+	if [[ "${KBS_MANAGEMENT:-client}" == "operator" ]]; then
+		skip "Operator-managed AS produces affirming trust claims from PCCS collateral without explicit reference values"
 	fi
 
 	# Require CPU0 to have affirming trust level.
