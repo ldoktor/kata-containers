@@ -36,7 +36,7 @@ function setup_unencrypted_confidential_pod() {
 	fi
 
 	# Set permissions on private key file
-	sudo chmod 600 "${SSH_KEY_FILE}"
+	chmod 600 "${SSH_KEY_FILE}"
 }
 
 # This function relies on `KATA_HYPERVISOR` being an environment variable
