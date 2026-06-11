@@ -20,6 +20,28 @@ KBS_DEPLOYMENT="${KBS_DEPLOYMENT:-trustee-deployment}"
 KBS_CONFIG_NAME="${KBS_CONFIG_NAME:-trustee-config-kbs-config}"
 KBS_RESOURCE_POLICY_CM="${KBS_RESOURCE_POLICY_CM:-trustee-config-resource-policy}"
 
+# Saved operator default policy — captured once at load time so
+# kbs_set_default_policy can restore the original rather than
+# hardcoding allow-all.
+_KBS_OPERATOR_DEFAULT_POLICY_FILE=""
+
+_kbs_save_operator_default_policy() {
+	if [[ -n "${_KBS_OPERATOR_DEFAULT_POLICY_FILE}" ]]; then
+		return 0
+	fi
+	_KBS_OPERATOR_DEFAULT_POLICY_FILE=$(mktemp -t kbs-operator-default-policy-XXXXX.rego)
+	kubectl get configmap "${KBS_RESOURCE_POLICY_CM}" -n "${KBS_NS}" \
+		-o jsonpath='{.data.policy\.rego}' > "${_KBS_OPERATOR_DEFAULT_POLICY_FILE}" 2>/dev/null || true
+	if [[ ! -s "${_KBS_OPERATOR_DEFAULT_POLICY_FILE}" ]]; then
+		cat > "${_KBS_OPERATOR_DEFAULT_POLICY_FILE}" <<-'EOREGO'
+			package policy
+			default allow = true
+		EOREGO
+	fi
+}
+
+_kbs_save_operator_default_policy
+
 # Override service discovery for operator-managed KBS. The shared
 # kbs_k8s_svc_host/port functions assume nodePort which doesn't exist
 # for ClusterIP services. Use the in-cluster DNS name instead.
@@ -183,7 +205,7 @@ kbs_set_deny_all_resources() {
 }
 
 kbs_set_default_policy() {
-	kbs_set_allow_all_resources
+	kbs_set_resources_policy "${_KBS_OPERATOR_DEFAULT_POLICY_FILE}"
 }
 
 # Build and install the kbs-client binary. Not needed for operator backend.
