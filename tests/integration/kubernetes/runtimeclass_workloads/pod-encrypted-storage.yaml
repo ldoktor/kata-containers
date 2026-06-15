@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: storage-encrypted
+  labels:
+    app: storage-encrypted
+spec:
+  runtimeClassName: kata
+  shareProcessNamespace: true
+  restartPolicy: Never
+  initContainers:
+  - name: format-disk
+    image: quay.io/redhat-user-workloads/ose-osc-tenant/osc-storage-helper:2ea94e49a2f1139b2b527d7c575ac2dcbcb162c1
+    command: ["/usr/local/bin/luks-helper", "format-disk"]
+    securityContext:
+      privileged: true
+    restartPolicy: Always
+    env:
+    - name: PASS
+      valueFrom:
+        secretKeyRef:
+          name: sealed-secrets
+          key: secret
+    volumeMounts:
+    - name: storage-ipc
+      mountPath: /dev/shm
+    volumeDevices:
+    - name: luks-block
+      devicePath: /dev/block-device
+  - name: check-ready
+    image: quay.io/redhat-user-workloads/ose-osc-tenant/osc-storage-helper:2ea94e49a2f1139b2b527d7c575ac2dcbcb162c1
+    command: ["/usr/local/bin/luks-helper", "wait-ready"]
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: storage-ipc
+      mountPath: /dev/shm
+  containers:
+  - name: hello-openshift
+    image: quay.io/openshift/origin-hello-openshift
+    ports:
+    - containerPort: 8888
+    env:
+    - name: DATA_DIR
+      value: /data
+    lifecycle:
+      postStart:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - |
+            PID=$(cat /dev/shm/luks-helper.pid)
+            chmod ug+w "$(dirname "$DATA_DIR")"
+            ln -sfn "/proc/$PID/root/mnt/storage" "$DATA_DIR"
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: storage-ipc
+      mountPath: /dev/shm
+  volumes:
+  - name: luks-block
+    persistentVolumeClaim:
+      claimName: storage-encrypted
+  - name: storage-ipc
+    emptyDir:
+      medium: Memory
