@@ -52,10 +52,33 @@ setup() {
 	done
 }
 
+@test "Check default_vcpus annotation sets guest CPU count" {
+	local expected_vcpus=2
+	local pod_config
+
+	pod_config=$(new_pod_config "quay.io/prometheus/busybox:latest" \
+		"$(get_test_runtime_class)")
+	set_container_command "${pod_config}" "0" "sleep" "120"
+	set_metadata_annotation "${pod_config}" \
+		"io.katacontainers.config.hypervisor.default_vcpus" "${expected_vcpus}"
+	set_node "${pod_config}" "${node}"
+	auto_generate_policy "${policy_settings_dir}" "${pod_config}"
+
+	kubectl apply -f "${pod_config}"
+	kubectl wait --for=condition=Ready --timeout="${timeout}" pod test-e2e
+
+	local guest_cpus
+	guest_cpus=$(kubectl exec test-e2e -- grep -c ^processor /proc/cpuinfo)
+	[ "${guest_cpus}" -eq "${expected_vcpus}" ]
+
+	kubectl delete pod test-e2e
+}
+
 teardown() {
 	for pod in "${pods[@]}"; do
-		kubectl logs ${pod}
+		kubectl logs "${pod}" 2>/dev/null || true
 	done
+	kubectl delete pod test-e2e --ignore-not-found 2>/dev/null || true
 
 	teardown_common "${node}" "${node_start_time:-}"
 	delete_tmp_policy_settings_dir "${policy_settings_dir}"
