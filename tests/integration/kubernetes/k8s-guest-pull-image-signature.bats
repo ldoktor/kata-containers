@@ -22,11 +22,13 @@ setup() {
     fi
 
     setup_common || die "setup_common failed"
-    UNSIGNED_UNPROTECTED_REGISTRY_IMAGE="quay.io/prometheus/busybox:latest"
-    UNSIGNED_PROTECTED_REGISTRY_IMAGE="ghcr.io/confidential-containers/test-container-image-rs:unsigned"
-    COSIGN_SIGNED_PROTECTED_REGISTRY_IMAGE="ghcr.io/confidential-containers/test-container-image-rs:cosign-signed"
-    COSIGNED_SIGNED_PROTECTED_REGISTRY_WRONG_KEY_IMAGE="ghcr.io/confidential-containers/test-container-image-rs:cosign-signed-key2"
     test_image_supplemental_groups="10"
+    UNSIGNED_UNPROTECTED_REGISTRY_IMAGE="${UNSIGNED_UNPROTECTED_REGISTRY_IMAGE:-quay.io/prometheus/busybox:latest}"
+    UNSIGNED_PROTECTED_REGISTRY_IMAGE="${UNSIGNED_PROTECTED_REGISTRY_IMAGE:-ghcr.io/confidential-containers/test-container-image-rs:unsigned}"
+    COSIGN_SIGNED_PROTECTED_REGISTRY_IMAGE="${COSIGN_SIGNED_PROTECTED_REGISTRY_IMAGE:-ghcr.io/confidential-containers/test-container-image-rs:cosign-signed}"
+    COSIGNED_SIGNED_PROTECTED_REGISTRY_WRONG_KEY_IMAGE="${COSIGNED_SIGNED_PROTECTED_REGISTRY_WRONG_KEY_IMAGE:-ghcr.io/confidential-containers/test-container-image-rs:cosign-signed-key2}"
+    COSIGN_SIGNED_REGISTRY_PATH="${COSIGN_SIGNED_REGISTRY_PATH:-ghcr.io/confidential-containers/test-container-image-rs}"
+    UNSIGNED_PROTECTED_REGISTRY_PATH="${UNSIGNED_PROTECTED_REGISTRY_PATH:-${COSIGN_SIGNED_REGISTRY_PATH}}"
     SECURITY_POLICY_KBS_URI="kbs:///default/security-policy/test"
     policy_settings_dir="$(create_tmp_policy_settings_dir "${pod_config_dir}")"
 }
@@ -37,34 +39,21 @@ function setup_kbs_image_policy() {
     fi
 
     default_policy="${1:-insecureAcceptAnything}"
-    policy_json=$(cat << EOF
-{
-    "default": [
-        {
-        "type": "${default_policy}"
-        }
-    ],
-    "transports": {
-        "docker": {
-            "ghcr.io/confidential-containers/test-container-image-rs": [
-                {
-                    "type": "sigstoreSigned",
-                    "keyPath": "kbs:///default/cosign-public-key/test"
-                }
-            ],
-            "quay.io/prometheus": [
-                {
-                    "type": "insecureAcceptAnything"
-                }
-            ]
-        }
-    }
-}
-EOF
-    )
+    local sigstore_entry='"type": "sigstoreSigned", "keyPath": "kbs:///default/cosign-public-key/test"'
+    policy_json='{"default": [{"type": "'"${default_policy}"'"}], "transports": {"docker": {'
+    policy_json+='"'"${COSIGN_SIGNED_REGISTRY_PATH}"'": [{'"${sigstore_entry}"'}]'
+    if [ "${UNSIGNED_PROTECTED_REGISTRY_PATH}" != "${COSIGN_SIGNED_REGISTRY_PATH}" ]; then
+        policy_json+=', "'"${UNSIGNED_PROTECTED_REGISTRY_PATH}"'": [{'"${sigstore_entry}"'}]'
+    fi
+    policy_json+=', "quay.io/prometheus": [{"type": "insecureAcceptAnything"}]'
+    policy_json+='}}}'
 
-    # TODO: Update the CI to generate a signed image together with verification. See issue #9360
-    public_key=$(curl -sSL "https://raw.githubusercontent.com/confidential-containers/infra/main/container-images/keys/sign/cosign.pub")
+    if [ -n "${COSIGN_PUBLIC_KEY_FILE:-}" ] && [ -f "${COSIGN_PUBLIC_KEY_FILE}" ]; then
+        public_key=$(cat "${COSIGN_PUBLIC_KEY_FILE}")
+    else
+        COSIGN_PUBLIC_KEY_URL="${COSIGN_PUBLIC_KEY_URL:-https://raw.githubusercontent.com/confidential-containers/infra/main/container-images/keys/sign/cosign.pub}"
+        public_key=$(curl -sSL "${COSIGN_PUBLIC_KEY_URL}")
+    fi
 
     if ! is_confidential_hardware; then
         kbs_set_allow_all_resources
