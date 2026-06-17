@@ -25,6 +25,11 @@ setup() {
 }
 
 @test "Check the number vcpus are correctly allocated to the sandbox" {
+	# default_vcpus=0 triggers qemu to request 240 hotpluggable CPUs which
+	# exceeds KVM's maximum (64) on TDX, crashing the VM.
+	is_tdx_hypervisor "${KATA_HYPERVISOR}" && \
+		skip "default_vcpus=0 exceeds KVM max CPUs on TDX"
+
 	local pod
 	local log
 
