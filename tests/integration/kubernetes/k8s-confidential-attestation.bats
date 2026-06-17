@@ -51,16 +51,30 @@ setup() {
 	kbs_set_resource "default" "aa" "key" "$test_key"
 	local CC_KBS_ADDR
 	export CC_KBS_ADDR=$(kbs_k8s_svc_http_addr)
-	kernel_params_annotation="io.katacontainers.config.hypervisor.kernel_params"
-	kernel_params_value="agent.guest_components_rest_api=resource"
-	# Based on current config we still need to pass the agent.aa_kbc_params, but this might change
-	# as the CDH/attestation-agent config gets updated
-	if [ "${AA_KBC}" = "cc_kbc" ]; then
-		kernel_params_value+=" agent.aa_kbc_params=cc_kbc::${CC_KBS_ADDR}"
+
+	if [[ "${COCO_CONFIG_METHOD:-kernel_params}" == "initdata" ]]; then
+		local initdata
+		initdata=$(generate_attestation_initdata)
+		set_metadata_annotation "${K8S_TEST_YAML}" \
+			"io.katacontainers.config.hypervisor.cc_init_data" \
+			"${initdata}"
+	else
+		kernel_params_annotation="io.katacontainers.config.hypervisor.kernel_params"
+		kernel_params_value="agent.guest_components_rest_api=resource"
+		if [ "${AA_KBC}" = "cc_kbc" ]; then
+			kernel_params_value+=" agent.aa_kbc_params=cc_kbc::${CC_KBS_ADDR}"
+		fi
+		set_metadata_annotation "${K8S_TEST_YAML}" \
+			"${kernel_params_annotation}" \
+			"${kernel_params_value}"
 	fi
-	set_metadata_annotation "${K8S_TEST_YAML}" \
-		"${kernel_params_annotation}" \
-		"${kernel_params_value}"
+}
+
+generate_attestation_initdata() {
+	local CC_KBS_ADDRESS
+	CC_KBS_ADDRESS=$(kbs_k8s_svc_http_addr)
+
+	get_initdata_with_cdh_image_section ""
 }
 
 @test "Get CDH resource" {

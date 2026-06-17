@@ -34,19 +34,29 @@ setup() {
 
 	local CC_KBS_ADDR
 	export CC_KBS_ADDR=$(kbs_k8s_svc_http_addr)
-	kernel_params_annotation="io.katacontainers.config.hypervisor.kernel_params"
-	kernel_params_value="agent.guest_components_procs=confidential-data-hub"
 
-	# For now we set aa_kbc_params via kernel cmdline
-	if [ "${AA_KBC}" = "cc_kbc" ]; then
-		kernel_params_value+=" agent.aa_kbc_params=cc_kbc::${CC_KBS_ADDR}"
+	if [[ "${COCO_CONFIG_METHOD:-kernel_params}" == "initdata" ]]; then
+		local initdata
+		initdata=$(get_initdata_with_cdh_image_section "")
+		set_metadata_annotation "${K8S_TEST_ENV_YAML}" \
+			"io.katacontainers.config.hypervisor.cc_init_data" \
+			"${initdata}"
+		set_metadata_annotation "${K8S_TEST_FILE_YAML}" \
+			"io.katacontainers.config.hypervisor.cc_init_data" \
+			"${initdata}"
+	else
+		kernel_params_annotation="io.katacontainers.config.hypervisor.kernel_params"
+		kernel_params_value="agent.guest_components_procs=confidential-data-hub"
+		if [ "${AA_KBC}" = "cc_kbc" ]; then
+			kernel_params_value+=" agent.aa_kbc_params=cc_kbc::${CC_KBS_ADDR}"
+		fi
+		set_metadata_annotation "${K8S_TEST_ENV_YAML}" \
+			"${kernel_params_annotation}" \
+			"${kernel_params_value}"
+		set_metadata_annotation "${K8S_TEST_FILE_YAML}" \
+			"${kernel_params_annotation}" \
+			"${kernel_params_value}"
 	fi
-	set_metadata_annotation "${K8S_TEST_ENV_YAML}" \
-		"${kernel_params_annotation}" \
-		"${kernel_params_value}"
-	set_metadata_annotation "${K8S_TEST_FILE_YAML}" \
-		"${kernel_params_annotation}" \
-		"${kernel_params_value}"
 
 	# provision signing public key to KBS so that CDH can verify pre-created, signed secret.
 	setup_sealed_secret_signing_public_key
