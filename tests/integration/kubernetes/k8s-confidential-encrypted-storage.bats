@@ -27,6 +27,7 @@ setup() {
 	dev_file="/var/disk-sim"
 	loop_dev="/dev/loop1"
 	vol_capacity="5Gi"
+	OSC_STORAGE_HELPER_IMAGE="${OSC_STORAGE_HELPER_IMAGE:-quay.io/redhat-user-workloads/ose-osc-tenant/osc-storage-helper:latest}"
 
 	# Create loop device on the node
 	exec_host "${node}" "dd if=/dev/zero of=${dev_file} bs=1M count=5120 2>/dev/null"
@@ -51,6 +52,8 @@ setup() {
 }
 
 @test "CoCo pod with LUKS-encrypted block storage" {
+	sed -e "s|OSC_STORAGE_HELPER_IMAGE|${OSC_STORAGE_HELPER_IMAGE}|" \
+		"${pod_config_dir}/pod-encrypted-storage.yaml.in" > "${pod_config_dir}/pod-encrypted-storage.yaml"
 	kubectl apply -f "${pod_config_dir}/pod-encrypted-storage.yaml"
 	kubectl wait --for=condition=Ready --timeout=300s pod "${pod_name}"
 

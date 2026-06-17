@@ -10,7 +10,7 @@ spec:
   restartPolicy: Never
   initContainers:
   - name: format-disk
-    image: quay.io/redhat-user-workloads/ose-osc-tenant/osc-storage-helper:2ea94e49a2f1139b2b527d7c575ac2dcbcb162c1
+    image: OSC_STORAGE_HELPER_IMAGE
     command: ["/usr/local/bin/luks-helper", "format-disk"]
     securityContext:
       privileged: true
@@ -28,7 +28,7 @@ spec:
     - name: luks-block
       devicePath: /dev/block-device
   - name: check-ready
-    image: quay.io/redhat-user-workloads/ose-osc-tenant/osc-storage-helper:2ea94e49a2f1139b2b527d7c575ac2dcbcb162c1
+    image: OSC_STORAGE_HELPER_IMAGE
     command: ["/usr/local/bin/luks-helper", "wait-ready"]
     securityContext:
       privileged: true
