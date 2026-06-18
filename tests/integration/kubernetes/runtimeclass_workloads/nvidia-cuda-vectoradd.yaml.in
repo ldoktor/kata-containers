@@ -9,13 +9,15 @@ metadata:
   name: ${POD_NAME_CUDA}
   labels:
     app: ${POD_NAME_CUDA}
+  annotations:
+    io.katacontainers.config.hypervisor.default_memory: "${CUDA_VM_MEMORY}"
 spec:
   runtimeClassName: kata
   restartPolicy: Never
   containers:
   - name: cuda-vectoradd
-    image: "nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0-ubuntu22.04"
+    image: "${CUDA_VECTORADD_IMAGE}"
+    imagePullPolicy: IfNotPresent
     resources:
       limits:
         nvidia.com/pgpu: "1"
-        memory: 16Gi

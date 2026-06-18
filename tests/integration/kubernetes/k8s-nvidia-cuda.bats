@@ -17,6 +17,8 @@ fi
 export TEE
 
 export POD_NAME_CUDA="nvidia-cuda-vectoradd"
+export CUDA_VECTORADD_IMAGE="${CUDA_VECTORADD_IMAGE:-nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0-ubuntu22.04}"
+export CUDA_VM_MEMORY="${CUDA_VM_MEMORY:-32768}"
 
 POD_WAIT_TIMEOUT=${POD_WAIT_TIMEOUT:-300s}
 export POD_WAIT_TIMEOUT
@@ -28,6 +30,10 @@ setup() {
     pod_yaml="${pod_config_dir}/${POD_NAME_CUDA}.yaml"
 
     envsubst < "${pod_yaml_in}" > "${pod_yaml}"
+
+    if [[ -n "${CUDA_VECTORADD_CMD:-}" ]]; then
+        yq -i ".spec.containers[0].command = [\"${CUDA_VECTORADD_CMD}\"]" "${pod_yaml}"
+    fi
 
     policy_settings_dir="$(create_tmp_policy_settings_dir "${pod_config_dir}")"
     add_requests_to_policy_settings "${policy_settings_dir}" "ReadStreamRequest"
