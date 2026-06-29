@@ -105,6 +105,65 @@ setup() {
 	grep -q "PROTECTED_SECRET = unsealed_secret" <<< "$logs"
 }
 
+generate_unsigned_sealed_secret() {
+	local resource_uri="$1"
+	local payload
+	payload=$(echo -n "{\"version\":\"0.1.0\",\"type\":\"vault\",\"name\":\"${resource_uri}\",\"provider\":\"kbs\",\"provider_settings\":{},\"annotations\":{}}" \
+		| base64 -w0 | tr '+/' '-_' | tr -d '=')
+	echo "sealed.fakejwsheader.${payload}.fakesignature"
+}
+
+@test "Unseal unsigned vault secret via env var" {
+	local sealed_value
+	sealed_value=$(generate_unsigned_sealed_secret "kbs:///default/sealed-secret/test")
+
+	kbs_set_resource "default" "sealed-secret" "test" "unsealed_secret"
+
+	kubectl delete secret sealed-secret --ignore-not-found
+	kubectl create secret generic sealed-secret \
+		--from-literal="secret=${sealed_value}"
+
+	k8s_create_pod "${K8S_TEST_ENV_YAML}"
+
+	logs=$(kubectl logs secret-test-pod-cc)
+	echo "$logs"
+	grep -q "PROTECTED_SECRET = unsealed_secret" <<< "$logs"
+}
+
+@test "Unsigned vault secret stays sealed without KBS resource" {
+	local sealed_value
+	sealed_value=$(generate_unsigned_sealed_secret \
+		"kbs:///default/sealed-secret/nonexistent")
+
+	kubectl delete secret sealed-secret --ignore-not-found
+	kubectl create secret generic sealed-secret \
+		--from-literal="secret=${sealed_value}"
+
+	k8s_create_pod "${K8S_TEST_ENV_YAML}"
+
+	logs=$(kubectl logs secret-test-pod-cc)
+	echo "$logs"
+	run grep -q "PROTECTED_SECRET = unsealed_secret" <<< "$logs"
+	[ "$status" -eq 1 ]
+}
+
+@test "Unseal unsigned vault secret via volume mount" {
+	local sealed_value
+	sealed_value=$(generate_unsigned_sealed_secret "kbs:///default/sealed-secret/test")
+
+	kbs_set_resource "default" "sealed-secret" "test" "unsealed_secret"
+
+	kubectl delete secret sealed-secret --ignore-not-found
+	kubectl create secret generic sealed-secret \
+		--from-literal="secret=${sealed_value}"
+
+	k8s_create_pod "${K8S_TEST_FILE_YAML}"
+
+	logs=$(kubectl logs secret-test-pod-cc)
+	echo "$logs"
+	grep -q "PROTECTED_SECRET = unsealed_secret" <<< "$logs"
+}
+
 teardown() {
 	if ! is_confidential_runtime_class; then
 		skip "Test not supported for ${KATA_HYPERVISOR}."
