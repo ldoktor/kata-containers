@@ -269,10 +269,10 @@ function create_coco_pod_yaml_with_annotations() {
 #
 # Public JWK (no private key) used to verify the pre-created sealed secrets. Must match the key pair
 # that was used to sign SEALED_SECRET_PRECREATED_*.
-SEALED_SECRET_SIGNING_PUBLIC_JWK='{"alg":"ES256","crv":"P-256","kid":"sealed-secret-test-key","kty":"EC","use":"sig","x":"4jH376AuwTUCIx65AJ_56D7SZzWf7sGcEA7_Csq21UM","y":"rjdceysnSa5ZfzWOPGCURMUuHndxBAGUu4ISTIVN0yA"}'
+SEALED_SECRET_SIGNING_PUBLIC_JWK="${SEALED_SECRET_SIGNING_PUBLIC_JWK:-'{"alg":"ES256","crv":"P-256","kid":"sealed-secret-test-key","kty":"EC","use":"sig","x":"4jH376AuwTUCIx65AJ_56D7SZzWf7sGcEA7_Csq21UM","y":"rjdceysnSa5ZfzWOPGCURMUuHndxBAGUu4ISTIVN0yA"}'}"
 
 # Pre-created sealed secret for k8s-sealed-secret.bats (points to kbs:///default/sealed-secret/test)
-export SEALED_SECRET_PRECREATED_TEST="sealed.eyJiNjQiOnRydWUsImFsZyI6IkVTMjU2Iiwia2lkIjoia2JzOi8vL2RlZmF1bHQvc2lnbmluZy1rZXkvc2VhbGVkLXNlY3JldCJ9.eyJ2ZXJzaW9uIjoiMC4xLjAiLCJ0eXBlIjoidmF1bHQiLCJuYW1lIjoia2JzOi8vL2RlZmF1bHQvc2VhbGVkLXNlY3JldC90ZXN0IiwicHJvdmlkZXIiOiJrYnMiLCJwcm92aWRlcl9zZXR0aW5ncyI6e30sImFubm90YXRpb25zIjp7fX0.ZI2fTv5ramHqHQa9DKBFD5hlJ_Mjf6cEIcpsNGshpyhEiKklML0abfH600TD7LAFHf53oDIJmEcVsDtJ20UafQ"
+export SEALED_SECRET_PRECREATED_TEST="${SEALED_SECRET_PRECREATED_TEST:-sealed.eyJiNjQiOnRydWUsImFsZyI6IkVTMjU2Iiwia2lkIjoia2JzOi8vL2RlZmF1bHQvc2lnbmluZy1rZXkvc2VhbGVkLXNlY3JldCJ9.eyJ2ZXJzaW9uIjoiMC4xLjAiLCJ0eXBlIjoidmF1bHQiLCJuYW1lIjoia2JzOi8vL2RlZmF1bHQvc2VhbGVkLXNlY3JldC90ZXN0IiwicHJvdmlkZXIiOiJrYnMiLCJwcm92aWRlcl9zZXR0aW5ncyI6e30sImFubm90YXRpb25zIjp7fX0.ZI2fTv5ramHqHQa9DKBFD5hlJ_Mjf6cEIcpsNGshpyhEiKklML0abfH600TD7LAFHf53oDIJmEcVsDtJ20UafQ}"
 
 # Pre-created sealed secrets for k8s-nvidia-nim.bats (point to kbs:///default/ngc-api-key/instruct and embedqa)
 export SEALED_SECRET_PRECREATED_NIM_INSTRUCT="sealed.eyJiNjQiOnRydWUsImFsZyI6IkVTMjU2Iiwia2lkIjoia2JzOi8vL2RlZmF1bHQvc2lnbmluZy1rZXkvc2VhbGVkLXNlY3JldCJ9.eyJ2ZXJzaW9uIjoiMC4xLjAiLCJ0eXBlIjoidmF1bHQiLCJuYW1lIjoia2JzOi8vL2RlZmF1bHQvbmdjLWFwaS1rZXkvaW5zdHJ1Y3QiLCJwcm92aWRlciI6ImticyIsInByb3ZpZGVyX3NldHRpbmdzIjp7fSwiYW5ub3RhdGlvbnMiOnt9fQ.wpqvVFUaQymqgf54h70shZWDpk2NLW305wALz09YF0GKFBKBQiQB2sRwvn9Jk_rSju3YGLYxPO2Ub8qUbiMCuA"
