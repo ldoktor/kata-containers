@@ -49,7 +49,7 @@ kbs_set_resources_policy() {
 
 	echo "Setting KBS resource policy from ${file}"
 	kubectl create configmap "${KBS_RESOURCE_POLICY_CM}" \
-		--from-file=policy.rego="${file}" \
+		--from-file=resource-policy.rego="${file}" \
 		-n "${KBS_NS}" \
 		--dry-run=client -o yaml | kubectl apply -f -
 
