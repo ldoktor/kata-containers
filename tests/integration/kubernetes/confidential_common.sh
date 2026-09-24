@@ -345,6 +345,7 @@ url = "${CC_KBS_ADDRESS}"
 '''
 
 "cdh.toml" = '''
+skip_sealed_secret_verification = true
 [kbc]
 name = "cc_kbc"
 url = "${CC_KBS_ADDRESS}"
