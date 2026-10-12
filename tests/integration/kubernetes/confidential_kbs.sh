@@ -217,6 +217,68 @@ ensure_sev_snp_measure() {
 	pip install sev-snp-measure
 }
 
+# Register SNP reference values from a guest launched since the given node time.
+# Backends provide host execution/file access, snphost deployment and reference
+# value preparation/cleanup; parsing and measurement stay shared here.
+kbs_set_snp_reference_values() {
+	local start_time="$1"
+	kbs_prepare_snp_reference_values
+
+	local journal log_line qemu_cmd
+	journal=$(kbs_host_exec journalctl --no-pager -r -x -t kata --since "${start_time}")
+	# Go runtime logs: "launching <path> with: [<args>]"
+	# runtime-rs logs: "qemu args: <args>"
+	log_line=$(echo "${journal}" | grep -m 1 'launching.*qemu.*with:' || true)
+	if [[ -n "${log_line}" ]]; then
+		qemu_cmd=$(echo "${log_line}" | sed 's/.*with: \[\(.*\)\]".*/\1/')
+	else
+		log_line=$(echo "${journal}" | grep -m 1 'qemu args:' || true)
+		qemu_cmd=$(echo "${log_line}" | sed 's/.*qemu args: //')
+	fi
+	[[ -n "${qemu_cmd}" ]] || { echo "Could not find QEMU command line"; return 1; }
+
+	local kernel_path initrd_path firmware_path vcpu_count append
+	kernel_path=$(echo "${qemu_cmd}" | grep -oP -- '-kernel \K[^ ]+')
+	initrd_path=$(echo "${qemu_cmd}" | grep -oP -- '-initrd \K[^ ]+' || true)
+	firmware_path=$(echo "${qemu_cmd}" | grep -oP -- '-bios \K[^ ]+')
+	vcpu_count=$(echo "${qemu_cmd}" | grep -oP -- '-smp \K\d+')
+	append=$(echo "${qemu_cmd}" | grep -oP -- '-append \K.*?(?= -(smp|bios) )')
+	# Remove escape backslashes from dm-mod.create parameters.
+	append="${append//\\\"/\"}"
+
+	# Measurement is local for both backends and needs no SNP hardware.
+	kbs_copy_host_file "${kernel_path}" "${BATS_TEST_TMPDIR}/kernel"
+	kbs_copy_host_file "${firmware_path}" "${BATS_TEST_TMPDIR}/ovmf"
+	local measure_args=(
+		--mode=snp
+		--vcpus="${vcpu_count}"
+		--vcpu-type=EPYC-v4
+		--output-format=hex
+		--ovmf="${BATS_TEST_TMPDIR}/ovmf"
+		--kernel="${BATS_TEST_TMPDIR}/kernel"
+		--append="${append}"
+	)
+	if [[ -n "${initrd_path}" ]]; then
+		kbs_copy_host_file "${initrd_path}" "${BATS_TEST_TMPDIR}/initrd"
+		measure_args+=(--initrd="${BATS_TEST_TMPDIR}/initrd")
+	fi
+	local launch_measurement firmware
+	launch_measurement=$(PATH="${PATH}:${HOME}/.local/bin" sev-snp-measure "${measure_args[@]}")
+	echo "Calculated SNP launch measurement: ${launch_measurement}"
+	kbs_config_command set-sample-reference-value snp_launch_measurement "${launch_measurement}"
+
+	firmware=$(kbs_host_exec "${SNPHOST_BINARY}" show tcb | grep -A 5 "Reported TCB")
+	local microcode_version snp_version tee_version bootloader_version
+	microcode_version=$(echo "${firmware}" | grep -oP 'Microcode:\s*\K\d+')
+	snp_version=$(echo "${firmware}" | grep -oP 'SNP:\s*\K\d+')
+	tee_version=$(echo "${firmware}" | grep -oP 'TEE:\s*\K\d+')
+	bootloader_version=$(echo "${firmware}" | grep -oP 'Boot Loader:\s*\K\d+')
+	kbs_config_command set-sample-reference-value --as-integer snp_bootloader "${bootloader_version}"
+	kbs_config_command set-sample-reference-value --as-integer snp_microcode "${microcode_version}"
+	kbs_config_command set-sample-reference-value --as-integer snp_snp_svn "${snp_version}"
+	kbs_config_command set-sample-reference-value --as-integer snp_tee_svn "${tee_version}"
+}
+
 _ensure_rust() {
 	rust_version=${1:-}
 	if ! command -v rustc >/dev/null; then

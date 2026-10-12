@@ -20,6 +20,78 @@ KBS_DEPLOYMENT="${KBS_DEPLOYMENT:-trustee-deployment}"
 KBS_CONFIG_NAME="${KBS_CONFIG_NAME:-trustee-config-kbs-config}"
 KBS_RESOURCE_POLICY_CM="${KBS_RESOURCE_POLICY_CM:-trustee-config-resource-policy}"
 
+# Execute the same argument vector as the client backend, but on the selected
+# worker. Preserve kubectl's exit status through CRI-O CR removal.
+kbs_host_exec() {
+	local pod_name
+	pod_name=$(create_debugger_pod "${node}")
+	kubectl exec -qi -n kube-system "${pod_name}" -- chroot /host "$@" | tr -d '\r'
+	return "${PIPESTATUS[0]}"
+}
+
+kbs_copy_host_file() {
+	local source="$1" destination="$2"
+	local pod_name
+	pod_name=$(create_debugger_pod "${node}")
+	kubectl exec -n kube-system "${pod_name}" -- cat "/host/${source#/}" > "${destination}"
+}
+
+# RHCOS workers use a pinned prebuilt release, cached on the test driver and
+# copied through the debugger pod. No Rust installation is needed on either.
+ensure_snphost() {
+	if [[ -n "${KBS_SNPHOST_DIR:-}" ]]; then
+		[[ "${KBS_SNPHOST_NODE}" == "${node}" ]] || {
+			>&2 echo "ERROR: snphost was staged on '${KBS_SNPHOST_NODE}', but the test runs on '${node}'"
+			return 1
+		}
+		return 0
+	fi
+	local version="0.7.0"
+	local checksum="eab3c3bcba9ee85cb1c5108c92b82a5cf068d90c5aee1b43301bc57e152cd6ee"
+	local cache_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/kata-containers/snphost-${version}"
+	local binary="${cache_dir}/snphost"
+	mkdir -p "${cache_dir}"
+	if [[ ! -f "${binary}" ]] || \
+			! printf '%s  %s\n' "${checksum}" "${binary}" | sha256sum -c - >/dev/null 2>&1; then
+		local download="${BATS_TEST_TMPDIR}/snphost"
+		curl -fsSL --retry 3 --connect-timeout 30 --max-time 180 \
+			"https://github.com/virtee/snphost/releases/download/v${version}/snphost" -o "${download}"
+		printf '%s  %s\n' "${checksum}" "${download}" | sha256sum -c -
+		chmod 755 "${download}"
+		mv "${download}" "${binary}"
+	fi
+	KBS_SNPHOST_NODE="${node}"
+	KBS_SNPHOST_DIR=$(kbs_host_exec mktemp -d /var/tmp/kata-snphost.XXXXXX)
+	SNPHOST_BINARY="${KBS_SNPHOST_DIR}/snphost"
+	copy_file_to_host "${binary}" "${node}" "${SNPHOST_BINARY}"
+	kbs_host_exec chmod 755 "${SNPHOST_BINARY}"
+	kbs_host_exec "${SNPHOST_BINARY}" --version
+	kbs_host_exec test -c /dev/sev
+	echo "Staged snphost on ${node} at ${SNPHOST_BINARY}"
+}
+
+kbs_prepare_snp_reference_values() {
+	KBS_OPERATOR_REFERENCE_VALUES_BACKUP="${BATS_TEST_TMPDIR}/reference-values.json"
+	kbs_save_reference_values "${KBS_OPERATOR_REFERENCE_VALUES_BACKUP}"
+}
+
+# Called by teardown, including when measurement or resource retrieval fails.
+kbs_snp_cleanup() {
+	local rc=0
+	if [[ -n "${KBS_SNPHOST_DIR:-}" ]]; then
+		local node="${KBS_SNPHOST_NODE}"
+		if kbs_host_exec rm -rf "${KBS_SNPHOST_DIR}"; then
+			unset KBS_SNPHOST_DIR KBS_SNPHOST_NODE SNPHOST_BINARY
+		else
+			rc=$?
+		fi
+	fi
+	if [[ -f "${KBS_OPERATOR_REFERENCE_VALUES_BACKUP:-}" ]]; then
+		kbs_restore_reference_values "${KBS_OPERATOR_REFERENCE_VALUES_BACKUP}" || rc=$?
+	fi
+	return "${rc}"
+}
+
 # Override service discovery for operator-managed KBS. The shared
 # kbs_k8s_svc_host/port functions assume nodePort which doesn't exist
 # for ClusterIP services. Use the in-cluster DNS name instead.
@@ -58,12 +130,52 @@ kbs_set_resources_policy() {
 	sleep 5
 }
 
-# Execute an admin command. Not supported with operator-managed KBS since
-# the admin API is disabled (type=DenyAll).
-#
+# Reference values are managed through the operator's LocalJson ConfigMap.
+kbs_reference_values_configmap() {
+	kubectl get kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" \
+		-o jsonpath='{.spec.kbsRvpsRefValuesConfigMapName}'
+}
+
+kbs_save_reference_values() {
+	kubectl get configmap "$(kbs_reference_values_configmap)" -n "${KBS_NS}" \
+		-o json | jq -r '.data.reference_value' > "$1"
+}
+
+kbs_restore_reference_values() {
+	local patch
+	patch=$(jq -n --rawfile values "$1" '{data: {reference_value: $values}}')
+	kubectl patch configmap "$(kbs_reference_values_configmap)" -n "${KBS_NS}" \
+		--type=merge -p "${patch}" || return
+	kubectl rollout restart deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}" || return
+	kubectl rollout status deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}" --timeout=120s
+}
+
+# Translate the SNP test's sample reference values to LocalJson records.
 kbs_config_command() {
-	>&2 echo "WARNING: kbs_config_command is not supported with operator-managed KBS, skipping: $*"
-	return 0
+	local command="$1"; shift
+	if [[ "${command}" != "set-sample-reference-value" ]]; then
+		>&2 echo "ERROR: unsupported operator-managed KBS command: ${command}"
+		return 1
+	fi
+	local value_type="string"
+	if [[ "${1:-}" == "--as-integer" ]]; then
+		value_type="integer"
+		shift
+	fi
+	local name="$1" value="$2" file expiration
+	file=$(mktemp)
+	kbs_save_reference_values "${file}"
+	expiration=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)
+	local updated
+	# LocalJson stores a map of names to base64url-encoded serialized RV records.
+	updated=$(jq --arg name "${name}" --arg value "${value}" \
+		--arg type "${value_type}" --arg expiration "${expiration}" \
+		'.[$name] = ({version: "0.1.0", name: $name, expiration: $expiration,
+		value: [($value | if $type == "integer" then tonumber else . end)]}
+		| tojson | @base64 | gsub("\\+"; "-") | gsub("/"; "_"))' "${file}")
+	printf '%s\n' "${updated}" > "${file}"
+	kbs_restore_reference_values "${file}"
+	rm -f "${file}"
 }
 
 # Set resource, read data from file.
