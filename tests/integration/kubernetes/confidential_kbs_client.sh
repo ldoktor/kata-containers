@@ -9,6 +9,42 @@
 # is available. This is the default backend (KBS_MANAGEMENT=client).
 #
 
+# The client backend runs on the Kata host and builds snphost locally.
+readonly SNPHOST_DIR="/tmp/snphost-workdir"
+
+ensure_snphost() {
+	SNPHOST_BINARY="snphost"
+	command -v snphost >/dev/null && return
+
+	git clone https://github.com/virtee/snphost.git "${SNPHOST_DIR}"
+	pushd "${SNPHOST_DIR}"
+	_ensure_rust "1.85.0"
+	cargo build --release
+	sudo install -m 755 target/release/snphost /usr/local/bin/
+	popd
+	rm -rf "${SNPHOST_DIR}"
+}
+
+# Execute an argument vector on the Kata host, or copy its artifacts locally.
+kbs_host_exec() {
+	sudo "$@"
+}
+
+kbs_copy_host_file() {
+	cp "$1" "$2"
+}
+
+kbs_prepare_snp_reference_values() {
+	KBS_SNP_REFERENCE_VALUES_SET=true
+}
+
+kbs_snp_cleanup() {
+	# Preserve the client's reference invalidation for subsequent negative tests.
+	if [[ "${KBS_SNP_REFERENCE_VALUES_SET:-false}" == "true" ]]; then
+		kbs_config_command set-sample-reference-value snp_launch_measurement abcd
+	fi
+}
+
 # Set resources policy.
 #
 # Parameters:

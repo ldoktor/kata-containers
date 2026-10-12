@@ -27,7 +27,6 @@ setup() {
 	if [[ "${KATA_HYPERVISOR}" == *snp* ]]; then
 		ensure_sev_snp_measure
 		ensure_snphost
-
 	fi
 
 #	setup_unencrypted_confidential_pod
@@ -135,7 +134,7 @@ generate_attestation_initdata() {
 # affirming trust vector when verification completes successfully, even
 # without reference values.
 #
-# Also skipped with operator-managed KBS (e.g. Red Hat build of Trustee)
+# Also skipped for non-SNP runtimes with operator-managed KBS (e.g. Red Hat build of Trustee)
 # where the built-in AS verifies TDX evidence against Intel collateral
 # from PCCS and produces affirming trust claims without explicit
 # reference values — same behavior as IBM SEL.
@@ -148,7 +147,7 @@ generate_attestation_initdata() {
 		skip "${skip_reason}"
 	fi
 
-	if [[ "${KBS_MANAGEMENT:-client}" == "operator" ]]; then
+	if [[ "${KBS_MANAGEMENT:-client}" == "operator" && "${KATA_HYPERVISOR}" != *snp* ]]; then
 		skip "Operator-managed AS produces affirming trust claims from PCCS collateral without explicit reference values"
 	fi
 
@@ -174,59 +173,17 @@ generate_attestation_initdata() {
 
 	[[ "${KATA_HYPERVISOR}" == *snp* ]] || skip "Test only supported with SNP"
 
-	# set a policy that requires CPU0 to have affirming trust level
+	# Bootstrap the exact same guest under allow-all. This also lets the test
+	# run on its own, without measuring a guest left by a previous test.
+	kbs_set_allow_all_resources
+	local bootstrap_start
+	bootstrap_start=$(measure_node_time "${node}")
+	kubectl apply -f "${K8S_TEST_YAML}"
+	kubectl wait --for=condition=Ready --timeout="$timeout" pod aa-test-cc
+	kbs_set_snp_reference_values "${bootstrap_start}"
+
+	kubectl delete pod aa-test-cc --wait=true
 	kbs_set_cpu0_resource_policy
-
-	# get measured artifacts from qemu command line of previous test
-	# Go runtime logs: "launching <path> with: [<args>]"
-	# runtime-rs logs: "qemu args: <args>"
-	log_line=$(sudo journalctl -r -x -t kata | grep -m 1 'launching.*qemu.*with:' || true)
-	if [[ -n "$log_line" ]]; then
-		qemu_cmd=$(echo "$log_line" | sed 's/.*with: \[\(.*\)\]".*/\1/')
-	else
-		log_line=$(sudo journalctl -r -x -t kata | grep -m 1 'qemu args:' || true)
-		qemu_cmd=$(echo "$log_line" | sed 's/.*qemu args: //')
-	fi
-	[[ -n "$qemu_cmd" ]] || { echo "Could not find QEMU command line"; return 1; }
-
-	kernel_path=$(echo "$qemu_cmd" | grep -oP -- '-kernel \K[^ ]+')
-	initrd_path=$(echo "$qemu_cmd" | grep -oP -- '-initrd \K[^ ]+' || true)
-	firmware_path=$(echo "$qemu_cmd" | grep -oP -- '-bios \K[^ ]+')
-	vcpu_count=$(echo "$qemu_cmd" | grep -oP -- '-smp \K\d+')
-	append=$(echo "$qemu_cmd" | grep -oP -- '-append \K.*?(?= -(smp|bios) )')
-	# Remove escape backslashes for quotes from output for dm-mod.create parameters
-	append="${append//\\\"/\"}"
-
-	measure_args=(
-		--mode=snp
-		--vcpus="${vcpu_count}"
-		--vcpu-type=EPYC-v4
-		--output-format=hex
-		--ovmf="${firmware_path}"
-		--kernel="${kernel_path}"
-		--append="${append}"
-	)
-	if [[ -n "${initrd_path}" ]]; then
-		measure_args+=(--initrd="${initrd_path}")
-	fi
-	launch_measurement=$(PATH="${PATH}:${HOME}/.local/bin" sev-snp-measure "${measure_args[@]}")
-
-	# set launch measurement as reference value
-	kbs_config_command set-sample-reference-value snp_launch_measurement "${launch_measurement}"
-
-	# Get the reported firmware version(s) for this machine
-	firmware=$(sudo snphost show tcb | grep -A 5 "Reported TCB")
-
-	microcode_version=$(echo "$firmware" | grep -oP 'Microcode:\s*\K\d+')
-	snp_version=$(echo "$firmware" | grep -oP 'SNP:\s*\K\d+')
-	tee_version=$(echo "$firmware" | grep -oP 'TEE:\s*\K\d+')
-	bootloader_version=$(echo "$firmware" | grep -oP 'Boot Loader:\s*\K\d+')
-
-	kbs_config_command set-sample-reference-value --as-integer snp_bootloader "${bootloader_version}"
-	kbs_config_command set-sample-reference-value --as-integer snp_microcode "${microcode_version}"
-	kbs_config_command set-sample-reference-value --as-integer snp_snp_svn "${snp_version}"
-	kbs_config_command set-sample-reference-value --as-integer snp_tee_svn "${tee_version}"
-
 	kubectl apply -f "${K8S_TEST_YAML}"
 
 	# Retrieve pod name, wait for it to come up, retrieve pod ip
@@ -240,13 +197,7 @@ generate_attestation_initdata() {
 	kubectl logs aa-test-cc
 	cmd="kubectl logs aa-test-cc | grep -q ${test_key}"
 	run bash -c "$cmd"
-	result=$status
-
-	# Set the snp launch measurement to something invalid, such that future negative tests
-	# running in the same context will work.
-	kbs_config_command set-sample-reference-value snp_launch_measurement abcd
-
-	[ "$result" -eq 0 ]
+	[ "$status" -eq 0 ]
 }
 
 
@@ -255,6 +206,10 @@ teardown() {
 
 	if [ "${KBS}" = "false" ]; then
 		skip "Test skipped as KBS not setup"
+	fi
+
+	if [[ "${KATA_HYPERVISOR}" == *snp* ]]; then
+		kbs_snp_cleanup
 	fi
 
 	confidential_teardown_common "${node}" "${node_start_time:-}"
