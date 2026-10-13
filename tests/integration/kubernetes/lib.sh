@@ -168,6 +168,23 @@ exec_host() {
 	kubectl exec -qi -n kube-system "${pod_name}" -- chroot /host bash -c "${command}" | tr -d '\r'
 }
 
+# Prepare a host path for sharing with a container.
+#
+# Parameters:
+#	$1 - the node name
+#	$2 - the host path
+#
+make_path_shareable() {
+	local node="$1"
+	local path="$2"
+
+	exec_host "${node}" "
+		if selinuxenabled 2>/dev/null; then
+			chcon -R -t container_file_t '${path}'
+		fi
+	"
+}
+
 # Check the logged messages on host have a given message.
 #
 # Parameters:
