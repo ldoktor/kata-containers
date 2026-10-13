@@ -22,6 +22,7 @@ setup() {
 	pod_yaml=$(mktemp --tmpdir pod_config.XXXXXX.yaml)
 	msg="Hello from Kubernetes"
 	exec_host "$node" "echo $msg > $tmp_file/index.html"
+	make_path_shareable "${node}" "${tmp_file}"
 	pod_name="pv-pod"
 	# Define temporary file at yaml
 	sed -e "s|tmp_data|${tmp_file}|g" ${pod_config_dir}/pv-volume.yaml > "$pv_yaml"

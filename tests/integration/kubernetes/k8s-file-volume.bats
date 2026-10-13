@@ -24,6 +24,7 @@ setup() {
 
 	# Write test body to temp file
 	exec_host "$node" "echo "$file_body" > $tmp_file"
+	make_path_shareable "${node}" "${tmp_file}"
 
 	# Create test yaml
 	test_yaml="${pod_config_dir}/test-pod-file-volume.yaml"
