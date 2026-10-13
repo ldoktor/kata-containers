@@ -35,16 +35,17 @@ setup() {
 	kubectl wait --for=condition=Ready --timeout=$timeout pod $pod_name
 
 	# Check PID from first container
+	# The sandbox process is /pause upstream and /usr/bin/pod on OpenShift.
 	# Strip \r — containers with tty: true return \r\n line endings
 	first_pid_container=$(kubectl exec $pod_name -c $first_container_name \
-		-- $ps_command | grep "/pause" | tr -d '\r')
+		-- $ps_command | grep -E '(/pause|/usr/bin/pod)([[:space:]]|$)' | tr -d '\r')
 	# Verify that is not empty
 	check_first_pid=$(echo $first_pid_container | wc -l)
 	[ "$check_first_pid" == "1" ]
 
 	# Check PID from second container
 	second_pid_container=$(kubectl exec $pod_name -c $second_container_name \
-		-- $ps_command | grep "/pause" | tr -d '\r')
+		-- $ps_command | grep -E '(/pause|/usr/bin/pod)([[:space:]]|$)' | tr -d '\r')
 	# Verify that is not empty
 	check_second_pid=$(echo $second_pid_container | wc -l)
 	[ "$check_second_pid" == "1" ]
