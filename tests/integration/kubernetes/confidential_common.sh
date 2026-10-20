@@ -314,10 +314,12 @@ function get_initdata_with_cdh_image_section() {
 	CC_KBS_ADDRESS=$(kbs_k8s_svc_http_addr)
 
 	local cdh_proxy_section=""
-	if is_tdx_hypervisor && [[ -n "${HTTPS_PROXY}" ]]; then
+	if [[ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]]; then
 		cdh_proxy_section="
 [image.image_pull_proxy]
-https_proxy = \"${HTTPS_PROXY}\""
+https_proxy = \"${HTTPS_PROXY:-${https_proxy:-}}\"
+http_proxy = \"${HTTP_PROXY:-${http_proxy:-}}\"
+no_proxy = \"${NO_PROXY:-${no_proxy:-}}\""
 	fi
 
 	 initdata_annotation=$(gzip -c << EOF | base64 -w0
