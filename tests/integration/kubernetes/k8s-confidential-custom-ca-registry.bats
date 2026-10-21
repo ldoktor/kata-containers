@@ -23,6 +23,9 @@ setup_file() {
 	CUSTOM_CA_REGISTRY_PORT="${CUSTOM_CA_REGISTRY_PORT:-$(( (unique_suffix % 10000) + 20000 ))}"
 	CUSTOM_CA_CONTAINER_NAME="test-custom-ca-registry-${unique_suffix}"
 	CUSTOM_CA_CM_NAME="custom-ca-registry-${unique_suffix}"
+	CUSTOM_CA_ORIGINAL_CA_CM=$(oc get image.config.openshift.io/cluster \
+		-o jsonpath='{.spec.additionalTrustedCA.name}')
+	export CUSTOM_CA_ORIGINAL_CA_CM
 
 	# Determine the registry host IP (reachable from the guest VM).
 	CUSTOM_CA_REGISTRY_HOST="${CUSTOM_CA_REGISTRY_HOST:-$(hostname -I | awk '{print $1}')}"
@@ -108,9 +111,17 @@ setup_file() {
 	# Add the CA cert to OCP's additionalTrustedCA so the host's container
 	# runtime can reach the registry for the image metadata pull.
 	local registry_key="${CUSTOM_CA_REGISTRY_HOST}..${CUSTOM_CA_REGISTRY_PORT}"
+	local original_ca_data='{}'
+	if [[ -n "${CUSTOM_CA_ORIGINAL_CA_CM}" ]]; then
+		original_ca_data=$(oc get configmap "${CUSTOM_CA_ORIGINAL_CA_CM}" -n openshift-config \
+			-o json | jq '.data // {}')
+	fi
 	oc delete configmap ${CUSTOM_CA_CM_NAME} -n openshift-config --ignore-not-found 2>/dev/null
 	oc create configmap ${CUSTOM_CA_CM_NAME} -n openshift-config \
-		--from-file="${registry_key}=${cert_dir}/CA/${ca_name}.crt"
+		--from-file="${registry_key}=${cert_dir}/CA/${ca_name}.crt" \
+		--dry-run=client -o json \
+		| jq --argjson original "${original_ca_data}" '.data = ($original + .data)' \
+		| oc apply -f -
 	oc patch image.config.openshift.io/cluster --type=merge \
 		-p "{\"spec\":{\"additionalTrustedCA\":{\"name\":\"${CUSTOM_CA_CM_NAME}\"}}}"
 
@@ -194,8 +205,8 @@ teardown_file() {
 	${CONTAINER_ENGINE} stop ${CUSTOM_CA_CONTAINER_NAME} 2>/dev/null || true
 	${CONTAINER_ENGINE} rm ${CUSTOM_CA_CONTAINER_NAME} 2>/dev/null || true
 
-	# Remove OCP additionalTrustedCA config.
-	oc delete configmap ${CUSTOM_CA_CM_NAME} -n openshift-config --ignore-not-found 2>/dev/null || true
+	# Restore the original registry CA bundle before removing the temporary one.
 	oc patch image.config.openshift.io/cluster --type=merge \
-		-p '{"spec":{"additionalTrustedCA":{"name":""}}}' 2>/dev/null || true
+		-p "{\"spec\":{\"additionalTrustedCA\":{\"name\":\"${CUSTOM_CA_ORIGINAL_CA_CM:-}\"}}}" 2>/dev/null || true
+	oc delete configmap ${CUSTOM_CA_CM_NAME} -n openshift-config --ignore-not-found 2>/dev/null || true
 }
