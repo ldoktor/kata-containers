@@ -28,6 +28,7 @@ setup() {
     COSIGNED_SIGNED_PROTECTED_REGISTRY_WRONG_KEY_IMAGE="${COSIGNED_SIGNED_PROTECTED_REGISTRY_WRONG_KEY_IMAGE:-ghcr.io/confidential-containers/test-container-image-rs:cosign-signed-key2}"
     COSIGN_SIGNED_REGISTRY_PATH="${COSIGN_SIGNED_REGISTRY_PATH:-ghcr.io/confidential-containers/test-container-image-rs}"
     UNSIGNED_PROTECTED_REGISTRY_PATH="${UNSIGNED_PROTECTED_REGISTRY_PATH:-${COSIGN_SIGNED_REGISTRY_PATH}}"
+    UNSIGNED_UNPROTECTED_REGISTRY_PATH="${UNSIGNED_UNPROTECTED_REGISTRY_PATH:-quay.io/prometheus}"
     SECURITY_POLICY_KBS_URI="kbs:///default/security-policy/test"
     policy_settings_dir="$(create_tmp_policy_settings_dir "${pod_config_dir}")"
 }
@@ -44,7 +45,7 @@ function setup_kbs_image_policy() {
     if [ "${UNSIGNED_PROTECTED_REGISTRY_PATH}" != "${COSIGN_SIGNED_REGISTRY_PATH}" ]; then
         policy_json+=', "'"${UNSIGNED_PROTECTED_REGISTRY_PATH}"'": [{'"${sigstore_entry}"'}]'
     fi
-    policy_json+=', "quay.io/prometheus": [{"type": "insecureAcceptAnything"}]'
+    policy_json+=', "'"${UNSIGNED_UNPROTECTED_REGISTRY_PATH}"'": [{"type": "insecureAcceptAnything"}]'
     policy_json+='}}}'
 
     if [ -n "${COSIGN_PUBLIC_KEY_FILE:-}" ] && [ -f "${COSIGN_PUBLIC_KEY_FILE}" ]; then
