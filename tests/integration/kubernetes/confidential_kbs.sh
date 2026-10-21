@@ -21,7 +21,8 @@ export PATH="${PATH}:/opt/kata/bin"
 KATA_HYPERVISOR="${KATA_HYPERVISOR:-qemu-runtime-rs}"
 HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-}}"
 # Where the trustee (includes kbs) sources will be cloned
-readonly COCO_TRUSTEE_DIR="/tmp/trustee"
+readonly COCO_TRUSTEE_DIR="${COCO_TRUSTEE_DIR:-/tmp/trustee}"
+# Where the kbs sources will be cloned
 readonly COCO_KBS_DIR="${COCO_TRUSTEE_DIR}/kbs"
 
 KBS_MANAGEMENT="${KBS_MANAGEMENT:-client}"
