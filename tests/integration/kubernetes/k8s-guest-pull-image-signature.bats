@@ -228,7 +228,8 @@ EOF
     # We want to set the default policy to be reject to rule out false positives
     setup_kbs_image_policy "reject"
 
-    create_coco_pod_yaml_with_annotations "${UNSIGNED_PROTECTED_REGISTRY_IMAGE}" "" "" "${node}"
+    initdata=$(get_initdata_with_cdh_image_section "")
+    create_coco_pod_yaml_with_annotations "${UNSIGNED_PROTECTED_REGISTRY_IMAGE}" "" "${initdata}" "${node}"
     auto_generate_policy "${policy_settings_dir}" "${kata_pod}"
 
     # For debug sake
