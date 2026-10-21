@@ -313,6 +313,20 @@ function get_initdata_with_cdh_image_section() {
 
 	CC_KBS_ADDRESS=$(kbs_k8s_svc_http_addr)
 
+	# Retain profile CA trust alongside test-specific image settings and CAs.
+	if [[ -n "${CDH_EXTRA_ROOT_CERTIFICATE:-}" ]]; then
+		local ca_entry
+		ca_entry="\"\"\""$'\n'"${CDH_EXTRA_ROOT_CERTIFICATE}"$'\n'"\"\"\""
+		if [[ "${CDH_IMAGE_SECTION}" =~ extra_root_certificates[[:space:]]*=[[:space:]]*\[ ]]; then
+			local ca_array="${BASH_REMATCH[0]}"
+			CDH_IMAGE_SECTION="${CDH_IMAGE_SECTION/"${ca_array}"/"${ca_array}${ca_entry},"}"
+		elif [[ "${CDH_IMAGE_SECTION}" == *"[image]"* ]]; then
+			CDH_IMAGE_SECTION="${CDH_IMAGE_SECTION/"[image]"/"[image]"$'\n'"extra_root_certificates = [${ca_entry}]"}"
+		else
+			CDH_IMAGE_SECTION="[image]"$'\n'"extra_root_certificates = [${ca_entry}]"$'\n'"${CDH_IMAGE_SECTION}"
+		fi
+	fi
+
 	local cdh_proxy_section=""
 	if [[ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]]; then
 		cdh_proxy_section="
@@ -339,6 +353,7 @@ name = "cc_kbc"
 url = "${CC_KBS_ADDRESS}"
 
 ${CDH_IMAGE_SECTION}
+${CDH_REGISTRY_CONFIG:-}
 ${cdh_proxy_section}
 '''
 
