@@ -20,6 +20,67 @@ KBS_DEPLOYMENT="${KBS_DEPLOYMENT:-trustee-deployment}"
 KBS_CONFIG_NAME="${KBS_CONFIG_NAME:-trustee-config-kbs-config}"
 KBS_RESOURCE_POLICY_CM="${KBS_RESOURCE_POLICY_CM:-trustee-config-resource-policy}"
 
+# Wait for the requested template change before trusting existing readiness.
+kbs_wait_for_reconciliation() {
+	local condition="$1" resource="$2" deployment
+	local deadline=$((SECONDS + 120))
+	# The resource update returns before the operator updates the pod template.
+	# Wait for the requested CM version or Secret volume state, including no-ops.
+	while true; do
+		deployment=$(kubectl get deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}" \
+			--request-timeout=10s -o json) || return
+		if jq -e --arg resource "${resource}" "${condition}" <<< "${deployment}" >/dev/null; then
+			break
+		fi
+		if ((SECONDS >= deadline)); then
+			>&2 echo "ERROR: Trustee did not reconcile '${resource}' within 120s"
+			return 1
+		fi
+		sleep 1
+	done
+	# isReady only checks replica counts and may still describe the old pods.
+	# Rollout status also waits for the Deployment generation and updated replicas.
+	kubectl rollout status deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}" --timeout=120s || return
+	local trustee_config
+	# Discover the owning TrusteeConfig so its propagated readiness can catch up.
+	trustee_config=$(kubectl get kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" \
+		-o jsonpath='{.metadata.ownerReferences[?(@.kind=="TrusteeConfig")].name}') || return
+	if [[ -n "${trustee_config}" ]]; then
+		kubectl wait "trusteeconfig/${trustee_config}" -n "${KBS_NS}" \
+			--for=jsonpath='{.status.isReady}'=true --timeout=120s
+	else
+		# Standalone KbsConfig deployments have no TrusteeConfig owner.
+		kubectl wait "kbsconfig/${KBS_CONFIG_NAME}" -n "${KBS_NS}" \
+			--for=jsonpath='{.status.isReady}'=true --timeout=120s
+	fi
+}
+
+kbs_update_configmap() {
+	local name="$1" key="$2" file="$3" patch version
+	patch=$(jq -n --arg key "${key}" --rawfile data "${file}" '{data: {($key): $data}}') || return
+	version=$(kubectl patch configmap "${name}" -n "${KBS_NS}" --type=merge -p "${patch}" \
+		-o jsonpath='{.metadata.resourceVersion}') || return
+	kbs_wait_for_reconciliation \
+		'(.spec.template.metadata.annotations["kbs.confidentialcontainers.org/configmap-versions"] // "" | split(",") | index($resource)) != null' \
+		"${name}:${version}"
+}
+
+kbs_set_secret_registration() {
+	local resource="$1" registered="$2" config patch condition
+	config=$(kubectl get kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" -o json) || return
+	patch=$(jq --arg resource "${resource}" --argjson registered "${registered}" '
+			{spec: {kbsSecretResources: ((.spec.kbsSecretResources // []) |
+				if $registered then . + [$resource] | unique
+				else map(select(. != $resource)) end)}}' <<< "${config}") || return
+	kubectl patch kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" --type=merge -p "${patch}" || return
+	if [[ "${registered}" == true ]]; then
+		condition='any(.spec.template.spec.volumes[]?; .secret.secretName == $resource)'
+	else
+		condition='all(.spec.template.spec.volumes[]?; .secret.secretName != $resource)'
+	fi
+	kbs_wait_for_reconciliation "${condition}" "${resource}"
+}
+
 # Execute the same argument vector as the client backend, but on the selected
 # worker. Preserve kubectl's exit status through CRI-O CR removal.
 kbs_host_exec() {
@@ -104,9 +165,7 @@ kbs_k8s_svc_http_addr() {
 
 # Set resources policy.
 #
-# Updates the resource policy ConfigMap and kills the KBS process inside the
-# pod so it restarts and picks up the new policy. This is faster than a full
-# rollout restart (~5s vs ~30s).
+# Updates the resource policy ConfigMap and waits for operator reconciliation.
 #
 # Parameters:
 #	$1 - path to policy file
@@ -120,14 +179,7 @@ kbs_set_resources_policy() {
 	fi
 
 	echo "Setting KBS resource policy from ${file}"
-	kubectl create configmap "${KBS_RESOURCE_POLICY_CM}" \
-		--from-file=resource-policy.rego="${file}" \
-		-n "${KBS_NS}" \
-		--dry-run=client -o yaml | kubectl apply -f -
-
-	kubectl rollout restart deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}"
-	kubectl rollout status deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}" --timeout=120s
-	sleep 5
+	kbs_update_configmap "${KBS_RESOURCE_POLICY_CM}" resource-policy.rego "${file}"
 }
 
 # Reference values are managed through the operator's LocalJson ConfigMap.
@@ -142,12 +194,9 @@ kbs_save_reference_values() {
 }
 
 kbs_restore_reference_values() {
-	local patch
-	patch=$(jq -n --rawfile values "$1" '{data: {reference_value: $values}}')
-	kubectl patch configmap "$(kbs_reference_values_configmap)" -n "${KBS_NS}" \
-		--type=merge -p "${patch}" || return
-	kubectl rollout restart deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}" || return
-	kubectl rollout status deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}" --timeout=120s
+	local name
+	name=$(kbs_reference_values_configmap) || return
+	kbs_update_configmap "${name}" reference_value "$1"
 }
 
 # Translate the SNP test's sample reference values to LocalJson records.
@@ -174,15 +223,17 @@ kbs_config_command() {
 		value: [($value | if $type == "integer" then tonumber else . end)]}
 		| tojson | @base64 | gsub("\\+"; "-") | gsub("/"; "_"))' "${file}")
 	printf '%s\n' "${updated}" > "${file}"
-	kbs_restore_reference_values "${file}"
+	local rc=0
+	kbs_restore_reference_values "${file}" || rc=$?
 	rm -f "${file}"
+	return "${rc}"
 }
 
 # Set resource, read data from file.
 #
 # Creates a K8s Secret and registers it in the KbsConfig CR's
-# kbsSecretResources list. Only triggers a rollout restart when adding
-# a new secret for the first time.
+# kbsSecretResources list. Changed resources are unregistered and re-registered
+# so operator-driven rollouts refresh the secret-converter repository.
 #
 # Parameters:
 #	$1 - repository name (optional)
@@ -206,31 +257,26 @@ kbs_set_resource_from_file() {
 
 	echo "Setting KBS resource: ${repository}/${type}/${tag}"
 
-	kubectl create secret generic "${type}" \
+	local desired existing current
+	desired=$(kubectl create secret generic "${type}" \
 		--from-file="${tag}=${file}" \
 		-n "${KBS_NS}" \
-		--dry-run=client -o yaml | kubectl apply -f -
-
-	local current
+		--dry-run=client -o json) || return
+	existing=$(kubectl get secret "${type}" -n "${KBS_NS}" --ignore-not-found -o json) || return
 	current=$(kubectl get kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" \
-		-o jsonpath='{.spec.kbsSecretResources[*]}' 2>/dev/null || true)
+		-o jsonpath='{.spec.kbsSecretResources[*]}') || return
 
-	if ! echo " ${current} " | grep -q " ${type} "; then
-		echo "Adding '${type}' to kbsSecretResources"
-		kubectl patch kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" \
-			--type=json \
-			-p="[{\"op\":\"add\",\"path\":\"/spec/kbsSecretResources/-\",\"value\":\"${type}\"}]"
-		# New secret requires a restart for the operator to mount it
-		kubectl rollout restart deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}"
-		kubectl rollout status deployment "${KBS_DEPLOYMENT}" -n "${KBS_NS}" --timeout=120s
-		sleep 5
+	if [[ " ${current} " == *" ${type} "* ]] && \
+			! jq -e --argjson desired "${desired}" '.data == $desired.data' <<< "${existing:-null}" >/dev/null; then
+		# The init container copies Secret data only when a new pod starts.
+		# Complete removal before updating data so failed attempts remain retryable.
+		kbs_set_secret_registration "${type}" false || return
 	fi
+	kubectl apply -f - <<< "${desired}" || return
+	kbs_set_secret_registration "${type}" true
 }
 
-# Delete a KBS resource Secret and unregister it from kbsSecretResources.
-#
-# This ensures kbs_set_resource_from_file will treat the next provision
-# as a fresh addition and trigger a rollout restart.
+# Unregister a KBS resource and wait for reconciliation before deleting its Secret.
 #
 # Parameters:
 #	$1 - repository name (unused, for API compatibility)
@@ -246,25 +292,8 @@ kbs_delete_resource() {
 	fi
 
 	echo "Deleting KBS resource secret: ${type}"
+	kbs_set_secret_registration "${type}" false || return
 	kubectl delete secret "${type}" -n "${KBS_NS}" --ignore-not-found
-
-	# Remove from kbsSecretResources so the next kbs_set_resource_from_file
-	# treats it as new and triggers a rollout restart.
-	local current idx
-	current=$(kubectl get kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" \
-		-o jsonpath='{.spec.kbsSecretResources[*]}' 2>/dev/null || true)
-
-	idx=0
-	for name in ${current}; do
-		if [[ "${name}" == "${type}" ]]; then
-			echo "Removing '${type}' from kbsSecretResources (index ${idx})"
-			kubectl patch kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" \
-				--type=json \
-				-p="[{\"op\":\"remove\",\"path\":\"/spec/kbsSecretResources/${idx}\"}]" 2>/dev/null || true
-			break
-		fi
-		idx=$((idx + 1))
-	done
 }
 
 # Override policy helpers for operator-managed KBS.
@@ -279,8 +308,10 @@ kbs_set_allow_all_resources() {
 		package policy
 		default allow = true
 	EOREGO
-	kbs_set_resources_policy "${policy_file}"
+	local rc=0
+	kbs_set_resources_policy "${policy_file}" || rc=$?
 	rm -f "${policy_file}"
+	return "${rc}"
 }
 
 kbs_set_deny_all_resources() {
@@ -290,8 +321,10 @@ kbs_set_deny_all_resources() {
 		package policy
 		default allow = false
 	EOREGO
-	kbs_set_resources_policy "${policy_file}"
+	local rc=0
+	kbs_set_resources_policy "${policy_file}" || rc=$?
 	rm -f "${policy_file}"
+	return "${rc}"
 }
 
 kbs_set_default_policy() {
