@@ -16,6 +16,13 @@ setup() {
 	pod_name="default-cpu-test"
 	pod_yaml="${pod_config_dir}/pod-cpu-defaults.yaml"
 
+	case "$(get_test_runtime_class)" in
+		kata | kata-cc | kata-nvidia-gpu | kata-cc-nvidia-gpu)
+			# Allow memory for the guest VM in OSC RuntimeClasses.
+			yq -i '.spec.containers[0].resources.limits.memory = "2Gi"' "${pod_yaml}"
+			;;
+	esac
+
 	policy_settings_dir="$(create_tmp_policy_settings_dir "${pod_config_dir}")"
 	auto_generate_policy "${policy_settings_dir}" "${pod_yaml}"
 }
