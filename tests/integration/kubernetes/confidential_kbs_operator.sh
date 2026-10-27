@@ -16,6 +16,8 @@
 #   KBS_CONFIG_NAME - name of the KbsConfig CR (default: trustee-config-kbs-config)
 #
 
+KBS_NS="${KBS_NS:-coco-tenant}"
+KBS_SVC_NAME="${KBS_SVC_NAME:-kbs}"
 KBS_DEPLOYMENT="${KBS_DEPLOYMENT:-trustee-deployment}"
 KBS_CONFIG_NAME="${KBS_CONFIG_NAME:-trustee-config-kbs-config}"
 KBS_RESOURCE_POLICY_CM="${KBS_RESOURCE_POLICY_CM:-trustee-config-resource-policy}"
@@ -114,7 +116,7 @@ ensure_snphost() {
 	mkdir -p "${cache_dir}"
 	if [[ ! -f "${binary}" ]] || \
 			! printf '%s  %s\n' "${checksum}" "${binary}" | sha256sum -c - >/dev/null 2>&1; then
-		local download="${BATS_TEST_TMPDIR}/snphost"
+		local download="${BATS_TEST_TMPDIR:?}/snphost"
 		curl -fsSL --retry 3 --connect-timeout 30 --max-time 180 \
 			"https://github.com/virtee/snphost/releases/download/v${version}/snphost" -o "${download}"
 		printf '%s  %s\n' "${checksum}" "${download}" | sha256sum -c -
@@ -132,7 +134,7 @@ ensure_snphost() {
 }
 
 kbs_prepare_snp_reference_values() {
-	KBS_OPERATOR_REFERENCE_VALUES_BACKUP="${BATS_TEST_TMPDIR}/reference-values.json"
+	KBS_OPERATOR_REFERENCE_VALUES_BACKUP="${BATS_TEST_TMPDIR:?}/reference-values.json"
 	kbs_save_reference_values "${KBS_OPERATOR_REFERENCE_VALUES_BACKUP}"
 }
 

@@ -248,7 +248,7 @@ kbs_set_snp_reference_values() {
 	append="${append//\\\"/\"}"
 
 	# Measurement is local for both backends and needs no SNP hardware.
-	kbs_copy_host_file "${kernel_path}" "${BATS_TEST_TMPDIR}/kernel"
+	kbs_copy_host_file "${kernel_path}" "${BATS_TEST_TMPDIR:?}/kernel"
 	kbs_copy_host_file "${firmware_path}" "${BATS_TEST_TMPDIR}/ovmf"
 	local measure_args=(
 		--mode=snp
@@ -268,7 +268,7 @@ kbs_set_snp_reference_values() {
 	echo "Calculated SNP launch measurement: ${launch_measurement}"
 	kbs_config_command set-sample-reference-value snp_launch_measurement "${launch_measurement}"
 
-	firmware=$(kbs_host_exec "${SNPHOST_BINARY}" show tcb | grep -A 5 "Reported TCB")
+	firmware=$(kbs_host_exec "${SNPHOST_BINARY:-snphost}" show tcb | grep -A 5 "Reported TCB")
 	local microcode_version snp_version tee_version bootloader_version
 	microcode_version=$(echo "${firmware}" | grep -oP 'Microcode:\s*\K\d+')
 	snp_version=$(echo "${firmware}" | grep -oP 'SNP:\s*\K\d+')

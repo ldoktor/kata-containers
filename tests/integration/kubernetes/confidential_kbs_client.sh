@@ -22,6 +22,14 @@ readonly KBS_BOOTSTRAP_SECRET="trustee-bootstrap-user-keys"
 # KDS_OFFLINE_STORE_PATH, so an OfflineStore source needs no explicit path.
 readonly SNP_KDS_STORE_DIR="${SNP_KDS_STORE_DIR:-/opt/confidential-containers/attestation-service/kds-store}"
 
+KATA_HYPERVISOR="${KATA_HYPERVISOR:-qemu}"
+KBS_NS="${KBS_NS:-coco-tenant}"
+KBS_PRIVATE_KEY="${KBS_PRIVATE_KEY:-/opt/trustee/install/kbs.key}"
+KBS_SVC_NAME="${KBS_SVC_NAME:-kbs}"
+# The shared library may have already made these paths readonly.
+: "${COCO_TRUSTEE_DIR:=/tmp/trustee}"
+: "${COCO_KBS_DIR:=${COCO_TRUSTEE_DIR}/kbs}"
+
 # The client backend runs on the Kata host and builds snphost locally.
 readonly SNPHOST_DIR="/tmp/snphost-workdir"
 
