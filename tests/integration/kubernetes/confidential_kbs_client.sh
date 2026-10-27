@@ -22,14 +22,14 @@ readonly SNPHOST_DIR="/tmp/snphost-workdir"
 
 ensure_snphost() {
 	SNPHOST_BINARY="snphost"
-	command -v snphost >/dev/null && return
+	command -v "${SNPHOST_BINARY}" >/dev/null && return
 
 	git clone https://github.com/virtee/snphost.git "${SNPHOST_DIR}"
-	pushd "${SNPHOST_DIR}"
+	pushd "${SNPHOST_DIR}" || return
 	_ensure_rust "1.85.0"
 	cargo build --release
 	sudo install -m 755 target/release/snphost /usr/local/bin/
-	popd
+	popd || return
 	rm -rf "${SNPHOST_DIR}"
 }
 
@@ -146,17 +146,17 @@ kbs_install_cli() {
 	rust_version=$(get_from_kata_deps ".externals.coco-trustee.toolchain")
 	_ensure_rust "${rust_version}"
 
-	pushd "${COCO_KBS_DIR}"
+	pushd "${COCO_KBS_DIR}" || return
 	make CLI_FEATURES=sample_only cli
 	sudo make install-cli
-	popd
+	popd || return
 }
 
 kbs_uninstall_cli() {
 	if [[ -d "${COCO_KBS_DIR}" ]]; then
-		pushd "${COCO_KBS_DIR}"
+		pushd "${COCO_KBS_DIR}" || return
 		sudo make uninstall
-		popd
+		popd || return
 	else
 		echo "${COCO_KBS_DIR} does not exist in the machine, skip uninstalling the kbs cli"
 	fi
@@ -196,13 +196,13 @@ function kbs_k8s_deploy() {
 
 	echo "::group::Clone the kbs sources"
 	git clone --depth 1 "${repo}" "${COCO_TRUSTEE_DIR}"
-	pushd "${COCO_TRUSTEE_DIR}"
+	pushd "${COCO_TRUSTEE_DIR}" || return
 	git fetch --depth=1 origin "${version}"
 	git checkout FETCH_HEAD -b kbs_$$
-	popd
+	popd || return
 	echo "::endgroup::"
 
-	pushd "${COCO_KBS_DIR}/config/kubernetes/"
+	pushd "${COCO_KBS_DIR}/config/kubernetes/" || return
 
 	echo "somesecret" > overlays/key.bin
 
@@ -214,9 +214,9 @@ function kbs_k8s_deploy() {
 
 	echo "::group::Update the kbs container image"
 	install_kustomize
-	pushd base
+	pushd base || return
 	kustomize edit set image "kbs-container-image=${image}:${image_tag}"
-	popd
+	popd || return
 	echo "::endgroup::"
 	[[ -n "${ingress}" ]] && _handle_ingress "${ingress}"
 
@@ -239,7 +239,7 @@ function kbs_k8s_deploy() {
 	sudo mkdir -p "$(dirname "${KBS_PRIVATE_KEY}")"
 	sudo cp -f "${install_key}" "${KBS_PRIVATE_KEY}"
 
-	popd
+	popd || return
 
 	if ! waitForProcess "120" "10" "kubectl -n \"${KBS_NS}\" get pods | \
 		grep -q '^kbs-.*Running.*'"; then
@@ -303,7 +303,7 @@ function kbs_k8s_deploy() {
 # Delete the kbs on Kubernetes
 #
 function kbs_k8s_delete() {
-	pushd "${COCO_KBS_DIR}"
+	pushd "${COCO_KBS_DIR}" || return
 	if [[ "${KATA_HYPERVISOR}" = qemu-se* ]]; then
 		kubectl delete -k config/kubernetes/overlays/ibm-se
 	else
@@ -312,5 +312,5 @@ function kbs_k8s_delete() {
 
 	cmd="kubectl get all -n ${KBS_NS} 2>&1 | grep 'No resources found'"
 	waitForProcess "120" "30" "${cmd}"
-	popd
+	popd || return
 }

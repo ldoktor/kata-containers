@@ -26,9 +26,9 @@ generate_sealed_secret() {
 	key_text=$(openssl ec -in "${tmpdir}/key.pem" -text -noout 2>/dev/null)
 
 	local priv_hex pub_hex x_hex y_hex
-	priv_hex=$(echo "$key_text" | sed -n '/priv:/,/pub:/p' \
+	priv_hex=$(echo "${key_text}" | sed -n '/priv:/,/pub:/p' \
 		| grep -oE '[0-9a-f]{2}(:[0-9a-f]{2})*' | tr -d ':\n')
-	pub_hex=$(echo "$key_text" | sed -n '/pub:/,/ASN1/p' \
+	pub_hex=$(echo "${key_text}" | sed -n '/pub:/,/ASN1/p' \
 		| grep -oE '[0-9a-f]{2}(:[0-9a-f]{2})*' | tr -d ':\n')
 	x_hex=${pub_hex:2:64}
 	y_hex=${pub_hex:66:64}
@@ -38,9 +38,9 @@ generate_sealed_secret() {
 	}
 
 	local x_b64 y_b64 d_b64
-	x_b64=$(_hex_to_b64url "$x_hex")
-	y_b64=$(_hex_to_b64url "$y_hex")
-	d_b64=$(_hex_to_b64url "$priv_hex")
+	x_b64=$(_hex_to_b64url "${x_hex}")
+	y_b64=$(_hex_to_b64url "${y_hex}")
+	d_b64=$(_hex_to_b64url "${priv_hex}")
 
 	local private_jwk public_jwk
 	private_jwk="{\"kty\":\"EC\",\"crv\":\"P-256\",\"alg\":\"ES256\",\"use\":\"sig\",\"kid\":\"${signing_kid}\",\"x\":\"${x_b64}\",\"y\":\"${y_b64}\",\"d\":\"${d_b64}\"}"

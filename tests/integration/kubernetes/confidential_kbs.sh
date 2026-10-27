@@ -269,10 +269,11 @@ kbs_set_snp_reference_values() {
 	# runtime-rs logs: "qemu args: <args>"
 	log_line=$(echo "${journal}" | grep -m 1 'launching.*qemu.*with:' || true)
 	if [[ -n "${log_line}" ]]; then
-		qemu_cmd=$(echo "${log_line}" | sed 's/.*with: \[\(.*\)\]".*/\1/')
+		qemu_cmd="${log_line##*with: \[}"
+		qemu_cmd="${qemu_cmd%\]\"*}"
 	else
 		log_line=$(echo "${journal}" | grep -m 1 'qemu args:' || true)
-		qemu_cmd=$(echo "${log_line}" | sed 's/.*qemu args: //')
+		qemu_cmd="${log_line##*qemu args: }"
 	fi
 	[[ -n "${qemu_cmd}" ]] || { echo "Could not find QEMU command line"; return 1; }
 
