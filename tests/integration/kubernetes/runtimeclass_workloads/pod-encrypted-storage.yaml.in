@@ -37,7 +37,8 @@ spec:
       mountPath: /dev/shm
   containers:
   - name: hello-openshift
-    image: quay.io/openshift/origin-hello-openshift
+    image: registry.access.redhat.com/ubi9/ubi@sha256:48393e4261b2544f652c915b3e052256ddf66ee95cd04dc0362191f302c4e94a
+    command: ["sleep", "infinity"]
     ports:
     - containerPort: 8888
     env:
