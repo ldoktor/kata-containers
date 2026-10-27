@@ -35,14 +35,14 @@ readonly SNPHOST_DIR="/tmp/snphost-workdir"
 
 ensure_snphost() {
 	SNPHOST_BINARY="snphost"
-	command -v snphost >/dev/null && return
+	command -v "${SNPHOST_BINARY}" >/dev/null && return
 
 	git clone https://github.com/virtee/snphost.git "${SNPHOST_DIR}"
-	pushd "${SNPHOST_DIR}"
+	pushd "${SNPHOST_DIR}" || return
 	_ensure_rust "1.85.0"
 	cargo build --release
 	sudo install -m 755 target/release/snphost /usr/local/bin/
-	popd
+	popd || return
 	rm -rf "${SNPHOST_DIR}"
 }
 
@@ -179,18 +179,18 @@ kbs_install_cli() {
 	# the required version.
 	_ensure_rust "${rust_version}"
 
-	pushd "${COCO_KBS_DIR}"
+	pushd "${COCO_KBS_DIR}" || return
 	# Compile with sample features to bypass attestation.
 	make CLI_FEATURES=sample_only cli
 	sudo make install-cli
-	popd
+	popd || return
 }
 
 kbs_uninstall_cli() {
 	if [[ -d "${COCO_KBS_DIR}" ]]; then
-		pushd "${COCO_KBS_DIR}"
+		pushd "${COCO_KBS_DIR}" || return
 		sudo make uninstall
-		popd
+		popd || return
 	else
 		echo "${COCO_KBS_DIR} does not exist in the machine, skip uninstalling the kbs cli"
 	fi
@@ -342,10 +342,10 @@ function kbs_k8s_deploy() {
 
 	echo "::group::Clone the trustee sources"
 	git clone --depth 1 "${repo}" "${COCO_TRUSTEE_DIR}"
-	pushd "${COCO_TRUSTEE_DIR}"
+	pushd "${COCO_TRUSTEE_DIR}" || return
 	git fetch --depth=1 origin "${version}"
 	git checkout FETCH_HEAD -b trustee_$$
-	popd
+	popd || return
 	echo "::endgroup::"
 
 	# Image tags match the trustee source version.
@@ -667,7 +667,7 @@ prepare_credentials_for_qemu_se() {
 		>&2 echo "ERROR: HKD_PATH is not set"
 		return 1
 	fi
-	pushd "${IBM_SE_CREDS_DIR}"
+	pushd "${IBM_SE_CREDS_DIR}" || return
 	mkdir {certs,crls,hdr,hkds,rsa}
 	openssl genrsa -aes256 -passout pass:test1234 -out encrypt_key-psw.pem 4096
 	openssl rsa -in encrypt_key-psw.pem -passin pass:test1234 -pubout -out rsa/encrypt_key.pub
@@ -676,7 +676,7 @@ prepare_credentials_for_qemu_se() {
 	cp "${HKD_PATH}"/HKD-*.crt hkds/
 	cp "${HKD_PATH}/ibm-z-host-key-gen2.crl" crls/
 	cp "${HKD_PATH}/DigiCertCA.crt" "${HKD_PATH}/ibm-z-host-key-signing-gen2.crt" certs/
-	popd
+	popd || return
 	ls -R "${IBM_SE_CREDS_DIR}"
 	echo "::endgroup::"
 }

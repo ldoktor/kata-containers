@@ -62,6 +62,7 @@ kbs_update_configmap() {
 	patch=$(jq -n --arg key "${key}" --rawfile data "${file}" '{data: {($key): $data}}') || return
 	version=$(kubectl patch configmap "${name}" -n "${KBS_NS}" --type=merge -p "${patch}" \
 		-o jsonpath='{.metadata.resourceVersion}') || return
+	# shellcheck disable=SC2016 # $resource is a jq variable.
 	kbs_wait_for_reconciliation \
 		'(.spec.template.metadata.annotations["kbs.confidentialcontainers.org/configmap-versions"] // "" | split(",") | index($resource)) != null' \
 		"${name}:${version}"
@@ -76,8 +77,10 @@ kbs_set_secret_registration() {
 				else map(select(. != $resource)) end)}}' <<< "${config}") || return
 	kubectl patch kbsconfig "${KBS_CONFIG_NAME}" -n "${KBS_NS}" --type=merge -p "${patch}" || return
 	if [[ "${registered}" == true ]]; then
+		# shellcheck disable=SC2016 # $resource is a jq variable.
 		condition='any(.spec.template.spec.volumes[]?; .secret.secretName == $resource)'
 	else
+		# shellcheck disable=SC2016 # $resource is a jq variable.
 		condition='all(.spec.template.spec.volumes[]?; .secret.secretName != $resource)'
 	fi
 	kbs_wait_for_reconciliation "${condition}" "${resource}"
