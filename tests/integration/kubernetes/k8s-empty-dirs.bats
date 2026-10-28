@@ -20,6 +20,8 @@ assert_equal() {
 }
 
 setup() {
+	[[ "${CONTAINER_RUNTIME:-}" == "crio" ]] && skip "CRI-O emptyDir/FSGroup support is incomplete"
+
 	pod_name="sharevol-kata"
 	pod_logs_file=""
 	setup_common || die "setup_common failed"
@@ -111,6 +113,8 @@ setup() {
 }
 
 teardown() {
+	[[ "${CONTAINER_RUNTIME:-}" == "crio" ]] && skip "CRI-O emptyDir/FSGroup support is incomplete"
+
 	[ ! -f "$pod_logs_file" ] || rm -f "$pod_logs_file"
 	[[ -n "${pod_config_dir:-}" ]] && rm -f "${pod_config_dir}/pod-empty-dir-fsgroup.yaml"
 
