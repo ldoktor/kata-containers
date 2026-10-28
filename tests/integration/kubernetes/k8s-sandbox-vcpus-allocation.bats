@@ -18,6 +18,13 @@ setup() {
 	yaml_file="${pod_config_dir}/pod-sandbox-vcpus-allocation.yaml"
 	set_node "$yaml_file" "$node"
 
+	case "$(get_test_runtime_class)" in
+		kata | kata-cc | kata-nvidia-gpu | kata-cc-nvidia-gpu)
+			# The pod cgroup must accommodate the guest VM as well as the workload.
+			yq -i '.spec.containers[].resources.limits.memory = "3Gi"' "${yaml_file}"
+			;;
+	esac
+
 	# Add policy to yaml
 	policy_settings_dir="$(create_tmp_policy_settings_dir "${pod_config_dir}")"
 	add_requests_to_policy_settings "${policy_settings_dir}" "ReadStreamRequest"
@@ -25,10 +32,17 @@ setup() {
 }
 
 @test "Check the number vcpus are correctly allocated to the sandbox" {
+	# CRI-O does not provide the sandbox sizing annotations for CPU limits.
+	[[ "${CONTAINER_RUNTIME:-}" == "crio" ]] && \
+		skip "CRI-O does not support CPU-limit-derived sandbox sizing"
+
 	# default_vcpus=0 triggers qemu to request 240 hotpluggable CPUs which
 	# exceeds KVM's maximum (64) on TDX, crashing the VM.
-	is_tdx_hypervisor "${KATA_HYPERVISOR}" && \
-		skip "default_vcpus=0 exceeds KVM max CPUs on TDX"
+	case "${KATA_HYPERVISOR}" in
+		qemu-tdx* | qemu-nvidia-gpu-tdx*)
+			skip "default_vcpus=0 exceeds KVM max CPUs on TDX"
+			;;
+	esac
 
 	local pod
 	local log
